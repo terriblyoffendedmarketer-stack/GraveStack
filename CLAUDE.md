@@ -56,6 +56,17 @@ scarcity is the off-switch for the variable-reward loop.
   local real-sentence fallback guarantees a genuine sample if the model paraphrases).
 - Model: `claude-sonnet-4-6` (via `ANTHROPIC_MODEL`). Missing key degrades gracefully to
   the subtitle — pitches are never a hard dependency for reading.
+- The Anthropic key is normally entered in the UI and kept in the browser's localStorage,
+  sent per-request as `X-Anthropic-Key` and applied via `cfgForRequest`. **Never persist
+  it server-side.** The `ANTHROPIC_API_KEY` env var is only an optional fallback. Pitches
+  are generated (browser present) and stored in the DB, so the server-side daily push can
+  read them without a key.
+
+## App password
+
+`APP_PASSWORD` is optional. Unset ⇒ the gate is open (`auth.enabled()` false). Recommended
+on public deployments because the Substack cookie lives server-side. Keep the gate logic
+optional — do not make the app hard-require a password.
 
 ## Events (v2 fuel)
 

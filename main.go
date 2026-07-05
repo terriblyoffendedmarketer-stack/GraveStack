@@ -84,6 +84,18 @@ func (s *server) routes(mux *http.ServeMux) {
 
 // ---- helpers ----
 
+// cfgForRequest returns a per-request copy of the config with the Anthropic key
+// overridden by the X-Anthropic-Key header when the browser supplies one (it is
+// kept in the browser's localStorage, sent per-request, and never persisted
+// server-side). Falls back to the ANTHROPIC_API_KEY env var when absent.
+func (s *server) cfgForRequest(r *http.Request) Config {
+	c := s.cfg
+	if k := strings.TrimSpace(r.Header.Get("X-Anthropic-Key")); k != "" {
+		c.AnthropicKey = k
+	}
+	return c
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -142,7 +154,7 @@ func (s *server) handleToday(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	ensurePitch(s.db, s.cfg, a)
+	ensurePitch(s.db, s.cfgForRequest(r), a)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"article":       a,
 		"canReroll":     !p.Dismissed && p.RerollsUsed < REROLLS_PER_DAY,
@@ -169,7 +181,7 @@ func (s *server) handleReroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	ensurePitch(s.db, s.cfg, a)
+	ensurePitch(s.db, s.cfgForRequest(r), a)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"article":   a,
 		"canReroll": p.RerollsUsed < REROLLS_PER_DAY,
@@ -220,13 +232,14 @@ func (s *server) handleSync(w http.ResponseWriter, r *http.Request) {
 		_ = setSetting(s.db, "cookie", cookie) // remember for future syncs
 	}
 	endpoint := getSetting(s.db, "saved_list_url")
-	res, newIDs, err := runSync(s.db, s.cfg, cookie, body.SavedJSON, endpoint)
+	cfg := s.cfgForRequest(r) // captures the browser-supplied Anthropic key for the goroutine
+	res, newIDs, err := runSync(s.db, cfg, cookie, body.SavedJSON, endpoint)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "result": res})
 		return
 	}
 	// Generate pitches in the background so the sync call returns fast.
-	go generatePitchesFor(s.db, s.cfg, newIDs)
+	go generatePitchesFor(s.db, cfg, newIDs)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -307,7 +320,7 @@ func (s *server) handleArticle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	ensurePitch(s.db, s.cfg, a)
+	ensurePitch(s.db, s.cfgForRequest(r), a)
 	_ = logEvent(s.db, id, "opened", 0)
 	writeJSON(w, http.StatusOK, map[string]any{"article": a})
 }

@@ -83,6 +83,18 @@
     </section>
 
     <section>
+      <h3>Pitches (Anthropic API key)</h3>
+      <p class="hint">Powers the one-line pitch + pull quote. Stored only in this browser
+        (localStorage), sent per request, never saved on the server. Without it, pitches
+        fall back to the article's subtitle.</p>
+      <label>API key
+        <input id="anthropic_key" type="password" placeholder="sk-ant-…" autocomplete="off">
+      </label>
+      <button onclick="saveKey()">Save key in this browser</button>
+      <p id="key-status" class="hint"></p>
+    </section>
+
+    <section>
       <h3>Daily notification</h3>
       <label>Time <input id="notify_time" type="time"></label>
       <label>Timezone <input id="timezone" type="text" placeholder="America/New_York"></label>

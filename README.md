@@ -63,8 +63,8 @@ Full article text is fetched per-post from each publication's
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `APP_PASSWORD` | *(none)* | Gate the app. **Set this in production** — your cookie lives server-side. |
-| `ANTHROPIC_API_KEY` | *(none)* | Enables LLM pitches. Without it, pitches fall back to the subtitle. |
+| `APP_PASSWORD` | *(none)* | **Optional.** Gates the app. Leave unset and the app runs with no login. Recommended on a public URL since your saved-articles data and Substack cookie live server-side (the cookie value is never returned by any endpoint). |
+| `ANTHROPIC_API_KEY` | *(none)* | Optional server-side fallback key for pitches. You can instead enter the key in **Settings**, where it's stored only in your browser (see below). Without any key, pitches fall back to the subtitle. |
 | `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | Pitch model. |
 | `DATA_DIR` | `./data` | SQLite location. **Point at a persistent volume in production.** |
 | `PORT` / `ADDR` | `8080` / `:8080` | Listen port. |
@@ -72,6 +72,14 @@ Full article text is fetched per-post from each publication's
 | `VAPID_SUBJECT` | `mailto:admin@…` | Contact for push services. |
 
 VAPID keys are generated and persisted automatically on first run.
+
+### Anthropic key: enter it in the app (no env var needed)
+
+Open **⚙ Settings → Pitches** and paste your key. It's saved in your browser's
+`localStorage` only, sent as a per-request header, and **never written to the server's
+disk**. Pitches are generated when you sync or open an article (while the browser has the
+key) and stored server-side, so the daily push still works without the browser open. The
+`ANTHROPIC_API_KEY` env var remains as an optional server-side fallback.
 
 ## Deploy (free-friendly)
 

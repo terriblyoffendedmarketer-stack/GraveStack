@@ -9,8 +9,16 @@ const $ = (id) => document.getElementById(id);
 const show = (el) => el.classList.remove('hidden');
 const hide = (el) => el.classList.add('hidden');
 
-async function api(path, opts) {
-  const res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
+// The Anthropic key lives only in this browser (localStorage) and rides along as
+// a header so the server can generate pitches without ever persisting it.
+const KEY_STORE = 'gs_anthropic_key';
+function anthropicKey() { return localStorage.getItem(KEY_STORE) || ''; }
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  const k = anthropicKey();
+  if (k) headers['X-Anthropic-Key'] = k;
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
   if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
   return res;
 }
@@ -137,8 +145,18 @@ async function loadSettings() {
   $('notify_time').value = s.notify_time || '';
   $('timezone').value = s.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || '';
   $('saved_list_url').value = s.saved_list_url || '';
+  $('anthropic_key').value = anthropicKey();
+  $('key-status').textContent = anthropicKey() ? 'Key set in this browser.' : 'No key yet — pitches fall back to the subtitle.';
   $('sync-status').textContent = s.hasCookie ? 'Cookie saved. Sync anytime.' : '';
-  if (!s.hasAnthropicKey) $('sync-status').textContent += ' (No Anthropic key set — pitches will fall back to the subtitle.)';
+}
+
+// saveKey stores the Anthropic key in this browser only (never sent to the
+// settings endpoint). It rides along as a header on future requests.
+function saveKey() {
+  const v = $('anthropic_key').value.trim();
+  if (v) localStorage.setItem(KEY_STORE, v);
+  else localStorage.removeItem(KEY_STORE);
+  $('key-status').textContent = v ? 'Saved in this browser.' : 'Cleared.';
 }
 
 async function saveSettings() {
