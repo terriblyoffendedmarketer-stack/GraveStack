@@ -1,0 +1,34 @@
+# Example Fly.io config. Recommended free-friendly setup: one always-on machine
+# + a small persistent volume so the backlog, pitches, and event log survive
+# redeploys, and the internal daily-push scheduler fires reliably.
+#
+#   fly launch --no-deploy          # creates the app (edit the name below)
+#   fly volumes create gravedata --size 1
+#   fly secrets set APP_PASSWORD=... ANTHROPIC_API_KEY=... CRON_TOKEN=...
+#   fly deploy
+#
+app = "gravestack"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATA_DIR = "/data"
+  PORT = "8080"
+  VAPID_SUBJECT = "mailto:you@example.com"
+
+[[mounts]]
+  source = "gravedata"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # keep it on so the daily scheduler runs
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
