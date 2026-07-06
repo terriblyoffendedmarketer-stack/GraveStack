@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f10">
+<title>GraveStack</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<!-- Login gate (shown only if APP_PASSWORD is set and not authed) -->
+<div id="login" class="screen hidden">
+  <form id="login-form" class="login-box">
+    <h1>GraveStack</h1>
+    <p>The one you saved is waiting.</p>
+    <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+    <button type="submit">Enter</button>
+    <p id="login-error" class="error hidden">Wrong password.</p>
+  </form>
+</div>
+
+<!-- The article-of-the-day: the whole app. No menu, no list. -->
+<main id="reader" class="screen hidden">
+  <button id="gear" class="gear" aria-label="Settings">⚙</button>
+
+  <article id="article">
+    <div id="cover" class="cover"></div>
+    <div class="pitch">
+      <h1 id="title"></h1>
+      <p id="pitch-line" class="pitch-line"></p>
+      <blockquote id="pull-quote" class="pull-quote"></blockquote>
+      <div id="meta" class="meta"></div>
+      <div class="scroll-cue">Keep reading ↓</div>
+    </div>
+    <div id="body" class="body"></div>
+    <div id="foot" class="foot">
+      <p class="foot-done">That's the one for today.</p>
+      <a id="not-today" class="not-today" href="#">Not today →</a>
+    </div>
+  </article>
+
+  <!-- States that replace the article -->
+  <div id="dismissed" class="state hidden">
+    <div class="state-inner">
+      <h2>Saved for later.</h2>
+      <p>A fresh pick lands tomorrow. That's the whole game.</p>
+    </div>
+  </div>
+  <div id="empty" class="state hidden">
+    <div class="state-inner">
+      <h2>Nothing in the crypt yet.</h2>
+      <p>Open settings and sync your saved articles.</p>
+      <button class="ghost" onclick="openSettings()">Open settings</button>
+    </div>
+  </div>
+</main>
+
+<!-- Settings: intentionally plain, buried behind the gear -->
+<div id="settings" class="screen hidden settings">
+  <div class="settings-inner">
+    <button class="back" onclick="closeSettings()">← Back to today</button>
+    <h2>Settings</h2>
+
+    <section>
+      <h3>Sync saved articles</h3>
+      <label>Substack session cookie
+        <textarea id="cookie" rows="3" placeholder="connect.sid=… (paste from DevTools → Application → Cookies)"></textarea>
+      </label>
+      <button id="sync-btn" onclick="doSync()">Sync now</button>
+      <details>
+        <summary>Endpoint drifted? Paste saved-list JSON instead</summary>
+        <p class="hint">Open your Substack “Saved” page, DevTools → Network, copy the JSON response, paste it here.</p>
+        <textarea id="saved-json" rows="4" placeholder='{"posts":[…]}'></textarea>
+        <button onclick="doSyncJSON()">Import pasted JSON</button>
+        <label>Or override the saved-list URL
+          <input id="saved_list_url" type="text" placeholder="https://substack.com/api/v1/reader/posts/saved?limit=100">
+        </label>
+      </details>
+      <p id="sync-status" class="hint"></p>
+    </section>
+
+    <section>
+      <h3>Pitches (Anthropic API key)</h3>
+      <p class="hint">Powers the one-line pitch + pull quote. Stored only in this browser
+        (localStorage), sent per request, never saved on the server. Without it, pitches
+        fall back to the article's subtitle.</p>
+      <label>API key
+        <input id="anthropic_key" type="password" placeholder="sk-ant-…" autocomplete="off">
+      </label>
+      <button onclick="saveKey()">Save key in this browser</button>
+      <p id="key-status" class="hint"></p>
+    </section>
+
+    <section>
+      <h3>Daily notification</h3>
+      <label>Time <input id="notify_time" type="time"></label>
+      <label>Timezone <input id="timezone" type="text" placeholder="America/New_York"></label>
+      <button id="notify-btn" onclick="enableNotifications()">Enable notifications on this device</button>
+      <p id="notify-status" class="hint"></p>
+    </section>
+
+    <section>
+      <button class="save" onclick="saveSettings()">Save settings</button>
+    </section>
+
+    <section class="library-section">
+      <details>
+        <summary>Browse everything (the boring way)</summary>
+        <p class="hint">On purpose: a plain list. Reading one a day is the point.</p>
+        <div id="library"></div>
+      </details>
+    </section>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

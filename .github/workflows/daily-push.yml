@@ -1,0 +1,25 @@
+# Fallback daily-push trigger for hosts that sleep (e.g. free tiers without an
+# always-on machine). The app's own scheduler already handles always-on hosts;
+# this just POSTs the token-protected cron endpoint so the push still fires.
+#
+# Setup:
+#   1. Repo Settings → Secrets and variables → Actions:
+#        GRAVESTACK_URL   = https://your-app.example.com
+#        GRAVESTACK_CRON_TOKEN = same value as the app's CRON_TOKEN env var
+#   2. The app decides whether to actually send, based on the user's notify_time
+#      and its once-per-day guard, so running this hourly is safe (idempotent).
+name: daily-push
+on:
+  schedule:
+    - cron: "0 * * * *"   # hourly; the app enforces the real notify time + once/day
+  workflow_dispatch: {}      # manual trigger for testing
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily push
+        run: |
+          curl -fsS -X POST \
+            "${{ secrets.GRAVESTACK_URL }}/internal/cron/daily?token=${{ secrets.GRAVESTACK_CRON_TOKEN }}" \
+            --max-time 90 || echo "cron ping failed (host may be waking); will retry next hour"

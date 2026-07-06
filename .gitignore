@@ -1,0 +1,5 @@
+/data/
+/gravestack
+*.db
+*.db-wal
+*.db-shm
