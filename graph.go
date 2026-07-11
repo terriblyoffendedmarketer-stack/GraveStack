@@ -88,45 +88,77 @@ You will receive articles with their themes and context. Find the 20-30 stronges
 
 Return JSON array: [{"a": <id>, "b": <id>, "relation": "deepens|challenges|complements|applies|echoes", "strength": 0.0-1.0, "reason": "one sentence explaining the connection"}]`
 
-// buildGraph processes all articles through the AI to create thematic threads
-// and article relationships. This is the one-time bulk job that powers the
-// entire intelligent UI.
+// buildGraph processes articles through the AI to create thematic threads and
+// relationships. Incremental: only analyzes articles missing from article_meta.
+// Pass rebuild=true to force a full reanalysis.
 func buildGraph(db *sql.DB, cfg Config) error {
+	return buildGraphOpts(db, cfg, false)
+}
+
+func buildGraphOpts(db *sql.DB, cfg Config, rebuild bool) error {
 	if cfg.AnthropicKey == "" {
 		return fmt.Errorf("no Anthropic key available — set it in Settings or as ANTHROPIC_API_KEY")
 	}
 
-	articles, err := loadAllArticles(db)
+	allArticles, err := loadAllArticles(db)
 	if err != nil {
 		return fmt.Errorf("load articles: %w", err)
 	}
-	log.Printf("graph: processing %d articles", len(articles))
 
-	// Phase 1: Analyze each article (in batches of 8)
-	var allMeta []articleAnalysis
-	batch := 8
-	for i := 0; i < len(articles); i += batch {
-		end := i + batch
-		if end > len(articles) {
-			end = len(articles)
+	// Split into already-analyzed and unanalyzed.
+	var toAnalyze []*Article
+	var existingMeta []articleAnalysis
+	for _, a := range allArticles {
+		if rebuild {
+			toAnalyze = append(toAnalyze, a)
+			continue
 		}
-		log.Printf("graph: analyzing batch %d-%d of %d", i+1, end, len(articles))
-		metas, err := analyzeArticleBatch(cfg, articles[i:end])
+		var themes, ctx, diff sql.NullString
+		err := db.QueryRow(`SELECT themes, context, difficulty FROM article_meta WHERE article_id = ?`, a.ID).
+			Scan(&themes, &ctx, &diff)
+		if err != nil {
+			toAnalyze = append(toAnalyze, a)
+		} else {
+			var t []string
+			_ = json.Unmarshal([]byte(themes.String), &t)
+			existingMeta = append(existingMeta, articleAnalysis{
+				ID: a.ID, Themes: t, Context: ctx.String, Difficulty: diff.String,
+			})
+		}
+	}
+	log.Printf("graph: %d total articles, %d already analyzed, %d to analyze",
+		len(allArticles), len(existingMeta), len(toAnalyze))
+
+	if len(toAnalyze) == 0 && !rebuild {
+		log.Printf("graph: nothing new to analyze")
+		return nil
+	}
+
+	// Phase 1: Analyze unanalyzed articles in batches of 8.
+	var newMeta []articleAnalysis
+	batch := 8
+	for i := 0; i < len(toAnalyze); i += batch {
+		end := i + batch
+		if end > len(toAnalyze) {
+			end = len(toAnalyze)
+		}
+		log.Printf("graph: analyzing batch %d-%d of %d new articles", i+1, end, len(toAnalyze))
+		metas, err := analyzeArticleBatch(cfg, toAnalyze[i:end])
 		if err != nil {
 			log.Printf("graph: batch %d-%d failed: %v", i+1, end, err)
 			continue
 		}
-		allMeta = append(allMeta, metas...)
-		if end < len(articles) {
+		newMeta = append(newMeta, metas...)
+		if end < len(toAnalyze) {
 			time.Sleep(1 * time.Second)
 		}
 	}
 
-	// Save article metadata
-	for _, m := range allMeta {
+	// Save new article metadata.
+	for _, m := range newMeta {
 		themesJSON, _ := json.Marshal(m.Themes)
 		readTime := 0
-		for _, a := range articles {
+		for _, a := range toAnalyze {
 			if a.ID == m.ID {
 				readTime = (a.WordCount + 249) / 250
 				break
@@ -141,18 +173,54 @@ func buildGraph(db *sql.DB, cfg Config) error {
 			log.Printf("graph: save meta %d: %v", m.ID, err)
 		}
 	}
-	log.Printf("graph: saved metadata for %d articles", len(allMeta))
+	log.Printf("graph: saved metadata for %d new articles", len(newMeta))
 
-	// Phase 2: Create threads from the analyzed articles
-	log.Printf("graph: creating threads")
-	if err := createThreads(db, cfg, articles, allMeta); err != nil {
-		log.Printf("graph: thread creation failed: %v", err)
+	// Combine all metadata for thread/relation generation.
+	allMeta := append(existingMeta, newMeta...)
+
+	// Phase 2: Threads — if no threads exist yet, create from scratch.
+	// Otherwise, place new articles into existing threads + check emergence.
+	var threadCount int
+	db.QueryRow(`SELECT COUNT(*) FROM threads`).Scan(&threadCount)
+
+	if threadCount == 0 {
+		log.Printf("graph: creating initial threads")
+		if err := createThreads(db, cfg, allArticles, allMeta); err != nil {
+			log.Printf("graph: thread creation failed: %v", err)
+		}
+	} else if len(newMeta) > 0 {
+		log.Printf("graph: placing %d new articles into existing threads", len(newMeta))
+		for _, m := range newMeta {
+			var a *Article
+			for _, art := range toAnalyze {
+				if art.ID == m.ID {
+					a = art
+					break
+				}
+			}
+			if a != nil {
+				placeArticleInThreads(db, cfg, a, m)
+			}
+		}
+		// Check thread emergence if enough unthreaded articles have accumulated.
+		checkThreadEmergence(db, cfg, allArticles, allMeta)
 	}
 
-	// Phase 3: Find cross-article relationships
-	log.Printf("graph: finding relationships")
-	if err := findRelations(db, cfg, articles, allMeta); err != nil {
-		log.Printf("graph: relation finding failed: %v", err)
+	// Phase 3: Relations — if none exist yet, create from scratch.
+	// Otherwise, find relations for new articles only.
+	var relCount int
+	db.QueryRow(`SELECT COUNT(*) FROM article_relations`).Scan(&relCount)
+
+	if relCount == 0 {
+		log.Printf("graph: finding initial relationships")
+		if err := findRelations(db, cfg, allArticles, allMeta); err != nil {
+			log.Printf("graph: relation finding failed: %v", err)
+		}
+	} else if len(newMeta) > 0 {
+		log.Printf("graph: finding relationships for %d new articles", len(newMeta))
+		if err := findNewRelations(db, cfg, allArticles, allMeta, newMeta); err != nil {
+			log.Printf("graph: new relation finding failed: %v", err)
+		}
 	}
 
 	log.Printf("graph: complete")
@@ -220,7 +288,7 @@ func createThreads(db *sql.DB, cfg Config, articles []*Article, metas []articleA
 		return fmt.Errorf("parse threads: %w", err)
 	}
 
-	// Clear existing threads and rebuild
+	// Clear existing threads and rebuild (only used for initial creation).
 	db.Exec(`DELETE FROM article_threads`)
 	db.Exec(`DELETE FROM threads`)
 
@@ -239,12 +307,206 @@ func createThreads(db *sql.DB, cfg Config, articles []*Article, metas []articleA
 			if t.ArticleContexts != nil {
 				ctx = t.ArticleContexts[fmt.Sprintf("%d", aid)]
 			}
-			db.Exec(`INSERT OR IGNORE INTO article_threads(article_id, thread_id, context) VALUES(?,?,?)`,
-				aid, threadID, ctx)
+			db.Exec(`INSERT OR IGNORE INTO article_threads(article_id, thread_id, relevance, context) VALUES(?,?,?,?)`,
+				aid, threadID, 1.0, ctx)
 		}
 	}
 	log.Printf("graph: created %d threads", len(result.Threads))
 	return nil
+}
+
+// placeArticleInThreads integrates a single newly-analyzed article into existing
+// threads, storing a relevance score for each placement.
+func placeArticleInThreads(db *sql.DB, cfg Config, a *Article, m articleAnalysis) {
+	rows, err := db.Query(`SELECT id, slug, title, description FROM threads`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	type threadInfo struct {
+		ID    int64
+		Slug  string
+		Title string
+		Desc  string
+	}
+	var threads []threadInfo
+	for rows.Next() {
+		var t threadInfo
+		rows.Scan(&t.ID, &t.Slug, &t.Title, &t.Desc)
+		threads = append(threads, t)
+	}
+	if len(threads) == 0 {
+		return
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "New article — ID: %d | %s (by %s) | themes: %s | context: %s\n\n",
+		a.ID, a.Title, a.Author, strings.Join(m.Themes, ", "), m.Context)
+	sb.WriteString("Existing threads:\n")
+	for _, t := range threads {
+		fmt.Fprintf(&sb, "- ID %d: %s — %s\n", t.ID, t.Title, t.Desc)
+	}
+
+	placement, err := callAnthropicRaw(cfg,
+		`Given a new article and existing thematic threads, decide which threads (if any) this article belongs in. For each placement, rate the fit from 0.0 (weak) to 1.0 (perfect).
+Return JSON: {"placements": [{"thread_id": <id>, "relevance": <0.0-1.0>, "context": "why it fits this thread"}]}. Only include threads where there's a genuine fit (relevance >= 0.3).`,
+		sb.String(), 500)
+	if err != nil {
+		log.Printf("graph: place article %d: %v", a.ID, err)
+		return
+	}
+
+	var result struct {
+		Placements []struct {
+			ThreadID  int64   `json:"thread_id"`
+			Relevance float64 `json:"relevance"`
+			Context   string  `json:"context"`
+		} `json:"placements"`
+	}
+	if parseJSONFromResponse(placement, &result) == nil {
+		for _, p := range result.Placements {
+			db.Exec(`INSERT OR REPLACE INTO article_threads(article_id, thread_id, relevance, context) VALUES(?,?,?,?)`,
+				a.ID, p.ThreadID, p.Relevance, p.Context)
+		}
+		log.Printf("graph: placed article %d into %d threads", a.ID, len(result.Placements))
+	}
+}
+
+const emergenceThreshold = 8
+
+// checkThreadEmergence looks for articles that aren't placed in any thread (or
+// only weakly placed). When enough accumulate, asks the AI whether a new theme
+// has emerged.
+func checkThreadEmergence(db *sql.DB, cfg Config, articles []*Article, metas []articleAnalysis) {
+	rows, err := db.Query(`
+		SELECT a.id FROM articles a
+		WHERE a.id NOT IN (
+			SELECT article_id FROM article_threads WHERE relevance >= 0.5
+		)
+		AND a.id IN (SELECT article_id FROM article_meta)`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	unthreaded := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		unthreaded[id] = true
+	}
+
+	if len(unthreaded) < emergenceThreshold {
+		log.Printf("graph: %d unthreaded articles (threshold %d), skipping emergence check",
+			len(unthreaded), emergenceThreshold)
+		return
+	}
+
+	log.Printf("graph: %d unthreaded articles — checking for new themes", len(unthreaded))
+
+	// Build context for the unthreaded articles.
+	var sb strings.Builder
+	sb.WriteString("These articles don't fit well into existing threads:\n")
+	for _, a := range articles {
+		if !unthreaded[a.ID] {
+			continue
+		}
+		for _, m := range metas {
+			if m.ID == a.ID {
+				fmt.Fprintf(&sb, "ID: %d | %s (by %s) | themes: %s | context: %s\n",
+					a.ID, a.Title, a.Author, strings.Join(m.Themes, ", "), m.Context)
+				break
+			}
+		}
+	}
+
+	// Also list existing threads so the AI can suggest better placements.
+	threadRows, err := db.Query(`SELECT id, title, description FROM threads`)
+	if err != nil {
+		return
+	}
+	defer threadRows.Close()
+	sb.WriteString("\nExisting threads:\n")
+	for threadRows.Next() {
+		var id int64
+		var title, desc string
+		threadRows.Scan(&id, &title, &desc)
+		fmt.Fprintf(&sb, "- ID %d: %s — %s\n", id, title, desc)
+	}
+
+	result, err := callAnthropicRaw(cfg,
+		`You're reviewing articles that don't fit existing threads well. Three possible outcomes:
+
+1. Some articles actually DO fit an existing thread — place them (with relevance score)
+2. A group of articles forms a new theme — create ONE new thread (at most)
+3. An existing thread should split because it's grown too broad
+
+Return JSON:
+{
+  "placements": [{"article_id": <id>, "thread_id": <existing_id>, "relevance": <0.0-1.0>, "context": "why"}],
+  "new_thread": null or {"slug": "...", "title": "...", "description": "...", "icon": "...", "article_ids": [...], "article_contexts": {"<id>": "..."}},
+  "reasoning": "one sentence on what you decided and why"
+}
+
+Only create a new thread if at least 3 articles genuinely cluster around the same idea. Prefer better placements into existing threads over new threads.`,
+		sb.String(), 2000)
+	if err != nil {
+		log.Printf("graph: emergence check failed: %v", err)
+		return
+	}
+
+	var emergence struct {
+		Placements []struct {
+			ArticleID int64   `json:"article_id"`
+			ThreadID  int64   `json:"thread_id"`
+			Relevance float64 `json:"relevance"`
+			Context   string  `json:"context"`
+		} `json:"placements"`
+		NewThread *struct {
+			Slug            string            `json:"slug"`
+			Title           string            `json:"title"`
+			Description     string            `json:"description"`
+			Icon            string            `json:"icon"`
+			ArticleIDs      []int64           `json:"article_ids"`
+			ArticleContexts map[string]string `json:"article_contexts"`
+		} `json:"new_thread"`
+		Reasoning string `json:"reasoning"`
+	}
+	if parseJSONFromResponse(result, &emergence) != nil {
+		log.Printf("graph: couldn't parse emergence response")
+		return
+	}
+
+	for _, p := range emergence.Placements {
+		db.Exec(`INSERT OR REPLACE INTO article_threads(article_id, thread_id, relevance, context) VALUES(?,?,?,?)`,
+			p.ArticleID, p.ThreadID, p.Relevance, p.Context)
+	}
+	log.Printf("graph: emergence placed %d articles into existing threads", len(emergence.Placements))
+
+	if emergence.NewThread != nil {
+		var maxOrder int
+		db.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) FROM threads`).Scan(&maxOrder)
+		res, err := db.Exec(`INSERT INTO threads(slug, title, description, icon, color, sort_order, created_at)
+			VALUES(?,?,?,?,?,?,?)`,
+			emergence.NewThread.Slug, emergence.NewThread.Title, emergence.NewThread.Description,
+			emergence.NewThread.Icon, "", maxOrder+1, nowUTC())
+		if err == nil {
+			threadID, _ := res.LastInsertId()
+			for _, aid := range emergence.NewThread.ArticleIDs {
+				ctx := ""
+				if emergence.NewThread.ArticleContexts != nil {
+					ctx = emergence.NewThread.ArticleContexts[fmt.Sprintf("%d", aid)]
+				}
+				db.Exec(`INSERT OR REPLACE INTO article_threads(article_id, thread_id, relevance, context) VALUES(?,?,?,?)`,
+					aid, threadID, 1.0, ctx)
+			}
+			log.Printf("graph: emergence created new thread %q with %d articles",
+				emergence.NewThread.Title, len(emergence.NewThread.ArticleIDs))
+		}
+	}
+
+	if emergence.Reasoning != "" {
+		log.Printf("graph: emergence reasoning: %s", emergence.Reasoning)
+	}
 }
 
 func findRelations(db *sql.DB, cfg Config, articles []*Article, metas []articleAnalysis) error {
@@ -281,6 +543,67 @@ func findRelations(db *sql.DB, cfg Config, articles []*Article, metas []articleA
 			VALUES(?,?,?,?,?)`, r.A, r.B, r.Relation, r.Strength, r.Reason)
 	}
 	log.Printf("graph: created %d relations", len(relations))
+	return nil
+}
+
+// findNewRelations discovers connections between newly analyzed articles and the
+// entire collection, without rebuilding existing relationships.
+func findNewRelations(db *sql.DB, cfg Config, allArticles []*Article, allMeta []articleAnalysis, newMeta []articleAnalysis) error {
+	newIDs := map[int64]bool{}
+	for _, m := range newMeta {
+		newIDs[m.ID] = true
+	}
+
+	var sb strings.Builder
+	sb.WriteString("NEW articles (find connections FROM these TO the rest):\n")
+	for _, a := range allArticles {
+		if !newIDs[a.ID] {
+			continue
+		}
+		for _, m := range newMeta {
+			if m.ID == a.ID {
+				fmt.Fprintf(&sb, "ID: %d | %s (by %s) | themes: %s | context: %s\n",
+					a.ID, a.Title, a.Author, strings.Join(m.Themes, ", "), m.Context)
+				break
+			}
+		}
+	}
+
+	sb.WriteString("\nEXISTING articles (potential connection targets):\n")
+	for _, a := range allArticles {
+		if newIDs[a.ID] {
+			continue
+		}
+		for _, m := range allMeta {
+			if m.ID == a.ID {
+				fmt.Fprintf(&sb, "ID: %d | %s (by %s) | themes: %s | context: %s\n",
+					a.ID, a.Title, a.Author, strings.Join(m.Themes, ", "), m.Context)
+				break
+			}
+		}
+	}
+
+	pr, err := callAnthropicRaw(cfg, relationsSystemPrompt+"\n\nFocus on connections involving the NEW articles. Each connection must have at least one NEW article.", sb.String(), 4000)
+	if err != nil {
+		return err
+	}
+
+	var relations []struct {
+		A        int64   `json:"a"`
+		B        int64   `json:"b"`
+		Relation string  `json:"relation"`
+		Strength float64 `json:"strength"`
+		Reason   string  `json:"reason"`
+	}
+	if err := parseJSONFromResponse(pr, &relations); err != nil {
+		return fmt.Errorf("parse relations: %w", err)
+	}
+
+	for _, r := range relations {
+		db.Exec(`INSERT OR IGNORE INTO article_relations(article_a, article_b, relation, strength, reason)
+			VALUES(?,?,?,?,?)`, r.A, r.B, r.Relation, r.Strength, r.Reason)
+	}
+	log.Printf("graph: found %d new relations", len(relations))
 	return nil
 }
 
@@ -399,77 +722,21 @@ func loadAllArticles(db *sql.DB) ([]*Article, error) {
 	return articles, nil
 }
 
-// addArticleToGraph processes a single new article and integrates it into
-// the existing graph. Called after sync for newly added articles.
-func addArticleToGraph(db *sql.DB, cfg Config, articleID int64) {
-	if cfg.AnthropicKey == "" {
-		return
-	}
-	a, err := getArticle(db, articleID)
-	if err != nil {
-		return
-	}
-	var pt sql.NullString
-	db.QueryRow(`SELECT plain_text FROM articles WHERE id = ?`, a.ID).Scan(&pt)
-	a.PlainText = pt.String
-
-	metas, err := analyzeArticleBatch(cfg, []*Article{a})
-	if err != nil || len(metas) == 0 {
-		return
-	}
-	m := metas[0]
-	themesJSON, _ := json.Marshal(m.Themes)
-	readTime := (a.WordCount + 249) / 250
-	db.Exec(`INSERT INTO article_meta(article_id, themes, context, read_time, difficulty, analyzed_at)
-		VALUES(?,?,?,?,?,?) ON CONFLICT(article_id) DO UPDATE SET
-		themes=excluded.themes, context=excluded.context, read_time=excluded.read_time,
-		difficulty=excluded.difficulty, analyzed_at=excluded.analyzed_at`,
-		m.ID, string(themesJSON), m.Context, readTime, m.Difficulty, nowUTC())
-
-	// Find which existing threads this article fits into
-	rows, err := db.Query(`SELECT id, slug, title, description FROM threads`)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-	type threadInfo struct {
-		ID    int64
-		Slug  string
-		Title string
-		Desc  string
-	}
-	var threads []threadInfo
-	for rows.Next() {
-		var t threadInfo
-		rows.Scan(&t.ID, &t.Slug, &t.Title, &t.Desc)
-		threads = append(threads, t)
-	}
-
-	if len(threads) > 0 {
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "New article — ID: %d | %s (by %s) | themes: %s | context: %s\n\n",
-			a.ID, a.Title, a.Author, strings.Join(m.Themes, ", "), m.Context)
-		sb.WriteString("Existing threads:\n")
-		for _, t := range threads {
-			fmt.Fprintf(&sb, "- ID %d: %s — %s\n", t.ID, t.Title, t.Desc)
-		}
-
-		placement, err := callAnthropicRaw(cfg,
-			`Given a new article and existing thematic threads, decide which threads (if any) this article belongs in. Return JSON: {"placements": [{"thread_id": <id>, "context": "why it fits"}]}. Only include threads where there's a genuine fit.`,
-			sb.String(), 500)
-		if err == nil {
-			var result struct {
-				Placements []struct {
-					ThreadID int64  `json:"thread_id"`
-					Context  string `json:"context"`
-				} `json:"placements"`
-			}
-			if parseJSONFromResponse(placement, &result) == nil {
-				for _, p := range result.Placements {
-					db.Exec(`INSERT OR IGNORE INTO article_threads(article_id, thread_id, context) VALUES(?,?,?)`,
-						a.ID, p.ThreadID, p.Context)
-				}
-			}
-		}
+// graphStatus returns a summary of the current graph state.
+func graphStatus(db *sql.DB) map[string]any {
+	var totalArticles, analyzed, threaded, relations, threads int
+	db.QueryRow(`SELECT COUNT(*) FROM articles`).Scan(&totalArticles)
+	db.QueryRow(`SELECT COUNT(*) FROM article_meta`).Scan(&analyzed)
+	db.QueryRow(`SELECT COUNT(DISTINCT article_id) FROM article_threads WHERE relevance >= 0.5`).Scan(&threaded)
+	db.QueryRow(`SELECT COUNT(*) FROM article_relations`).Scan(&relations)
+	db.QueryRow(`SELECT COUNT(*) FROM threads`).Scan(&threads)
+	return map[string]any{
+		"total_articles": totalArticles,
+		"analyzed":       analyzed,
+		"unanalyzed":     totalArticles - analyzed,
+		"threaded":       threaded,
+		"unthreaded":     totalArticles - threaded,
+		"relations":      relations,
+		"threads":        threads,
 	}
 }

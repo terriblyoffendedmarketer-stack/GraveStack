@@ -76,6 +76,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/subscribe", s.auth.require(s.handleSubscribe))
 
 	// Graph / intelligence
+	mux.HandleFunc("GET /api/graph-status", s.auth.require(s.handleGraphStatus))
 	mux.HandleFunc("POST /api/build-graph", s.auth.require(s.handleBuildGraph))
 	mux.HandleFunc("GET /api/threads", s.auth.require(s.handleThreads))
 	mux.HandleFunc("GET /api/thread/{slug}", s.auth.require(s.handleThread))
@@ -240,14 +241,15 @@ func (s *server) handleSync(w http.ResponseWriter, r *http.Request) {
 		_ = setSetting(s.db, "cookie", cookie) // remember for future syncs
 	}
 	endpoint := getSetting(s.db, "saved_list_url")
-	cfg := s.cfgForRequest(r) // captures the browser-supplied Anthropic key for the goroutine
-	res, newIDs, err := runSync(s.db, cfg, cookie, body.SavedJSON, endpoint)
+	cfg := s.cfgForRequest(r)
+	res, _, err := runSync(s.db, cfg, cookie, body.SavedJSON, endpoint)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "result": res})
 		return
 	}
-	// Generate pitches in the background so the sync call returns fast.
-	go generatePitchesFor(s.db, cfg, newIDs)
+	// Pitches and graph placement are lazy — generated on first view via
+	// ensurePitch, not on sync. Keeps sync fast and avoids wasted AI calls
+	// on articles the user may never open.
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -384,14 +386,27 @@ func isTruthy(s string) bool {
 
 // ---- graph / intelligence ----
 
+func (s *server) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, graphStatus(s.db))
+}
+
 func (s *server) handleBuildGraph(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfgForRequest(r)
+	rebuild := isTruthy(r.URL.Query().Get("rebuild"))
 	go func() {
-		if err := buildGraph(s.db, cfg); err != nil {
+		if err := buildGraphOpts(s.db, cfg, rebuild); err != nil {
 			log.Printf("build-graph: %v", err)
 		}
 	}()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "started"})
+	status := graphStatus(s.db)
+	status["ok"] = true
+	status["started"] = true
+	if rebuild {
+		status["mode"] = "full rebuild"
+	} else {
+		status["mode"] = "incremental"
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *server) handleThreads(w http.ResponseWriter, r *http.Request) {
