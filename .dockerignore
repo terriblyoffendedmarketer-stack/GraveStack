@@ -1,0 +1,7 @@
+# flyctl launch added from .gitignore
+data
+gravestack
+**/*.db
+**/*.db-wal
+**/*.db-shm
+fly.toml
