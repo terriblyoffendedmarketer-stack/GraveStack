@@ -72,6 +72,43 @@ CREATE TABLE IF NOT EXISTS settings (
 	key   TEXT PRIMARY KEY,
 	value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS threads (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	slug        TEXT UNIQUE NOT NULL,
+	title       TEXT NOT NULL,
+	description TEXT,
+	icon        TEXT,
+	color       TEXT,
+	sort_order  INTEGER DEFAULT 0,
+	created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS article_threads (
+	article_id INTEGER REFERENCES articles(id) ON DELETE CASCADE,
+	thread_id  INTEGER REFERENCES threads(id) ON DELETE CASCADE,
+	relevance  REAL DEFAULT 1.0,
+	context    TEXT,
+	PRIMARY KEY (article_id, thread_id)
+);
+
+CREATE TABLE IF NOT EXISTS article_relations (
+	article_a  INTEGER REFERENCES articles(id) ON DELETE CASCADE,
+	article_b  INTEGER REFERENCES articles(id) ON DELETE CASCADE,
+	relation   TEXT NOT NULL,
+	strength   REAL DEFAULT 1.0,
+	reason     TEXT,
+	PRIMARY KEY (article_a, article_b)
+);
+
+CREATE TABLE IF NOT EXISTS article_meta (
+	article_id  INTEGER PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+	themes      TEXT,
+	context     TEXT,
+	read_time   INTEGER DEFAULT 0,
+	difficulty  TEXT,
+	analyzed_at TEXT
+);
 `
 
 // Article is the stored representation of one saved Substack post.

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -73,6 +74,13 @@ func (s *server) routes(mux *http.ServeMux) {
 	// Push
 	mux.HandleFunc("GET /api/vapid-public-key", s.auth.require(s.handleVAPIDKey))
 	mux.HandleFunc("POST /api/subscribe", s.auth.require(s.handleSubscribe))
+
+	// Graph / intelligence
+	mux.HandleFunc("POST /api/build-graph", s.auth.require(s.handleBuildGraph))
+	mux.HandleFunc("GET /api/threads", s.auth.require(s.handleThreads))
+	mux.HandleFunc("GET /api/thread/{slug}", s.auth.require(s.handleThread))
+	mux.HandleFunc("GET /api/article/{id}/related", s.auth.require(s.handleRelated))
+	mux.HandleFunc("POST /api/ask", s.auth.require(s.handleAsk))
 
 	// External cron trigger (token-protected, no session needed)
 	mux.HandleFunc("POST /internal/cron/daily", s.handleCron)
@@ -372,4 +380,174 @@ func isTruthy(s string) bool {
 		return true
 	}
 	return false
+}
+
+// ---- graph / intelligence ----
+
+func (s *server) handleBuildGraph(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfgForRequest(r)
+	go func() {
+		if err := buildGraph(s.db, cfg); err != nil {
+			log.Printf("build-graph: %v", err)
+		}
+	}()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": "started"})
+}
+
+func (s *server) handleThreads(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(`SELECT t.id, t.slug, t.title, t.description, t.icon, t.color, t.sort_order,
+		(SELECT COUNT(*) FROM article_threads WHERE thread_id = t.id) as article_count
+		FROM threads t ORDER BY t.sort_order`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var threads []Thread
+	for rows.Next() {
+		var t Thread
+		if err := rows.Scan(&t.ID, &t.Slug, &t.Title, &t.Description, &t.Icon, &t.Color, &t.SortOrder, &t.ArticleCount); err != nil {
+			continue
+		}
+		threads = append(threads, t)
+	}
+	writeJSON(w, http.StatusOK, threads)
+}
+
+func (s *server) handleThread(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	var t Thread
+	err := s.db.QueryRow(`SELECT id, slug, title, description, icon, color, sort_order FROM threads WHERE slug = ?`, slug).
+		Scan(&t.ID, &t.Slug, &t.Title, &t.Description, &t.Icon, &t.Color, &t.SortOrder)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	artRows, err := s.db.Query(`SELECT at.article_id, at.context
+		FROM article_threads at WHERE at.thread_id = ? ORDER BY at.relevance DESC`, t.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer artRows.Close()
+
+	type threadArticle struct {
+		Article       *Article `json:"article"`
+		ThreadContext string   `json:"thread_context"`
+	}
+	var articles []threadArticle
+	for artRows.Next() {
+		var aid int64
+		var ctx sql.NullString
+		if err := artRows.Scan(&aid, &ctx); err != nil {
+			continue
+		}
+		a, err := getArticle(s.db, aid)
+		if err != nil {
+			continue
+		}
+		articles = append(articles, threadArticle{Article: a, ThreadContext: ctx.String})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"thread": t, "articles": articles})
+}
+
+func (s *server) handleRelated(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := s.db.Query(`
+		SELECT ar.relation, ar.strength, ar.reason,
+			CASE WHEN ar.article_a = ? THEN ar.article_b ELSE ar.article_a END as related_id
+		FROM article_relations ar
+		WHERE ar.article_a = ? OR ar.article_b = ?
+		ORDER BY ar.strength DESC
+		LIMIT 10`, id, id, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type related struct {
+		Article  *Article `json:"article"`
+		Relation string   `json:"relation"`
+		Strength float64  `json:"strength"`
+		Reason   string   `json:"reason"`
+	}
+	var results []related
+	for rows.Next() {
+		var rel, reason string
+		var strength float64
+		var relID int64
+		if err := rows.Scan(&rel, &strength, &reason, &relID); err != nil {
+			continue
+		}
+		a, err := getArticle(s.db, relID)
+		if err != nil {
+			continue
+		}
+		results = append(results, related{Article: a, Relation: rel, Strength: strength, Reason: reason})
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (s *server) handleAsk(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Query string `json:"query"`
+	}
+	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Query) == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	cfg := s.cfgForRequest(r)
+
+	// Load all articles with their metadata for context
+	rows, err := s.db.Query(`SELECT a.id, a.title, a.author, a.subtitle, am.themes, am.context
+		FROM articles a LEFT JOIN article_meta am ON am.article_id = a.id
+		ORDER BY a.id`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var catalog strings.Builder
+	for rows.Next() {
+		var id int64
+		var title, author, subtitle string
+		var themes, ctx sql.NullString
+		rows.Scan(&id, &title, &author, &subtitle, &themes, &ctx)
+		context := ctx.String
+		if context == "" {
+			context = subtitle
+		}
+		fmt.Fprintf(&catalog, "ID:%d | %s (by %s) | themes: %s | %s\n",
+			id, title, author, themes.String, context)
+	}
+
+	prompt := fmt.Sprintf("User's collection:\n%s\n\nUser asks: %s", catalog.String(), body.Query)
+
+	result, err := callAnthropicRaw(cfg,
+		`You are a thoughtful librarian for someone's personal article collection. They're asking about a topic — find the most relevant articles and write a short, engaging response.
+
+Your response MUST be valid JSON with this structure:
+{"writeup": "2-3 paragraphs exploring the user's question, weaving in references to specific articles by title. Teach them something from the articles, don't just list them. Make the writeup itself valuable to read.", "main_pick": <article_id>, "supporting": [<article_id>, ...], "reasoning": "one sentence on why you chose these"}
+
+The writeup should feel like a knowledgeable friend saying "oh, you're interested in that? Here's what your own collection has to say about it." Reference articles naturally, by title and author, as part of the narrative.`,
+		prompt, 2000)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var response map[string]any
+	if err := parseJSONFromResponse(result, &response); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"writeup": result, "main_pick": nil, "supporting": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }

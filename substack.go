@@ -19,7 +19,7 @@ import (
 // endpoint. It is very likely to drift — the user can override it in Settings
 // ("saved_list_url"), or bypass it entirely via the paste-JSON importer. The
 // response is parsed defensively (walkPosts) so schema changes rarely break us.
-const defaultSavedListURL = "https://substack.com/api/v1/reader/posts/saved?limit=100"
+const defaultSavedListURL = "https://substack.com/api/v1/reader/saved"
 
 // rawPost is the loose shape we try to pull out of any Substack JSON blob.
 // Every field is optional; walkPosts collects whatever it can find.
@@ -38,6 +38,7 @@ type rawPost struct {
 	PublishedBylines []struct {
 		Name string `json:"name"`
 	} `json:"publishedBylines"`
+	PubSubdomain string `json:"-"` // from parent publication object, not the post itself
 }
 
 // syncResult is returned to the UI after a sync run.
@@ -63,24 +64,33 @@ func httpClient() *http.Client { return &http.Client{Timeout: 30 * time.Second} 
 // substackGet performs an authenticated GET with the session cookie. cookie may
 // be a bare connect.sid value or a full "k=v; k2=v2" Cookie header — we forward
 // it verbatim so the user can paste whatever DevTools shows.
+// Retries up to 3 times on 429 (rate limit) with exponential backoff.
 func substackGet(cookie, rawurl string) ([]byte, error) {
-	req, err := http.NewRequest("GET", rawurl, nil)
-	if err != nil {
-		return nil, err
+	backoff := 2 * time.Second
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequest("GET", rawurl, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Cookie", normalizeCookie(cookie))
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 GraveStack")
+		resp, err := httpClient().Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < 3 {
+			time.Sleep(backoff)
+			backoff *= 2
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("GET %s: status %d", rawurl, resp.StatusCode)
+		}
+		return body, nil
 	}
-	req.Header.Set("Cookie", normalizeCookie(cookie))
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 GraveStack")
-	resp, err := httpClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d", rawurl, resp.StatusCode)
-	}
-	return body, nil
 }
 
 // normalizeCookie turns a bare "sid-value" into "connect.sid=sid-value"; a value
@@ -96,6 +106,8 @@ func normalizeCookie(c string) string {
 // walkPosts recursively descends arbitrary decoded JSON looking for objects that
 // look like posts (have a title and some URL/slug). This tolerates the saved
 // endpoint wrapping results under "posts", "items", "savedPosts", etc.
+// It also recognises the {post: {...}, publication: {subdomain: "..."}} wrapper
+// pattern and carries the publication subdomain into the rawPost.
 func walkPosts(v any, out *[]rawPost) {
 	switch t := v.(type) {
 	case []any:
@@ -107,6 +119,22 @@ func walkPosts(v any, out *[]rawPost) {
 			if rp, ok := decodePost(t); ok {
 				*out = append(*out, rp)
 				return
+			}
+		}
+		// Check for {post: {...}, publication: {subdomain: "..."}} wrapper.
+		if postVal, ok := t["post"]; ok {
+			if postMap, ok := postVal.(map[string]any); ok && looksLikePost(postMap) {
+				if rp, ok := decodePost(postMap); ok {
+					if pubVal, ok := t["publication"]; ok {
+						if pubMap, ok := pubVal.(map[string]any); ok {
+							if sd, ok := pubMap["subdomain"].(string); ok && sd != "" {
+								rp.PubSubdomain = sd
+							}
+						}
+					}
+					*out = append(*out, rp)
+					return
+				}
 			}
 		}
 		for _, e := range t {
@@ -161,6 +189,9 @@ func (rp rawPost) normalize() Article {
 	sub, slug := splitCanonical(rp.CanonicalURL)
 	if slug == "" {
 		slug = rp.SlugField
+	}
+	if rp.PubSubdomain != "" {
+		sub = rp.PubSubdomain
 	}
 	if id == "" { // last-resort stable id
 		id = rp.CanonicalURL
@@ -278,16 +309,58 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+// fetchAllPages follows cursor-based pagination on the saved-list endpoint,
+// collecting posts from every page.
+func fetchAllPages(cookie, endpoint string) ([]rawPost, error) {
+	var all []rawPost
+	cursor := ""
+	for i := 0; i < 50; i++ { // safety cap
+		u := endpoint
+		if cursor != "" {
+			sep := "?"
+			if strings.Contains(u, "?") {
+				sep = "&"
+			}
+			u = u + sep + "cursor=" + url.QueryEscape(cursor)
+		}
+		blob, err := substackGet(cookie, u)
+		if err != nil {
+			if len(all) > 0 {
+				break // partial success is fine
+			}
+			return nil, err
+		}
+		page, err := parseSavedJSON(blob)
+		if err != nil && len(all) == 0 {
+			return nil, err
+		}
+		all = append(all, page...)
+
+		var envelope struct {
+			NextCursor string `json:"nextCursor"`
+		}
+		_ = json.Unmarshal(blob, &envelope)
+		if envelope.NextCursor == "" || len(page) == 0 {
+			break
+		}
+		cursor = envelope.NextCursor
+	}
+	return all, nil
+}
+
 // runSync is the core importer. Either savedJSON (pasted) or cookie+endpoint
 // (live) provides the saved list; full bodies are fetched with the cookie when
 // available. Pitch generation is kicked off by the caller for new articles.
 func runSync(db *sql.DB, cfg Config, cookie, savedJSON, endpoint string) (syncResult, []int64, error) {
 	var res syncResult
-	var blob []byte
 	var err error
+	var posts []rawPost
 
 	if strings.TrimSpace(savedJSON) != "" {
-		blob = []byte(savedJSON)
+		posts, err = parseSavedJSON([]byte(savedJSON))
+		if err != nil {
+			return res, nil, err
+		}
 	} else {
 		if cookie == "" {
 			return res, nil, fmt.Errorf("no cookie and no pasted JSON provided")
@@ -295,39 +368,67 @@ func runSync(db *sql.DB, cfg Config, cookie, savedJSON, endpoint string) (syncRe
 		if endpoint == "" {
 			endpoint = defaultSavedListURL
 		}
-		blob, err = substackGet(cookie, endpoint)
+		posts, err = fetchAllPages(cookie, endpoint)
 		if err != nil {
 			return res, nil, fmt.Errorf("fetch saved list: %w", err)
 		}
 	}
 
-	posts, err := parseSavedJSON(blob)
-	if err != nil {
-		return res, nil, err
-	}
 	if len(posts) == 0 {
 		return res, nil, fmt.Errorf("no posts found in saved list (endpoint may have changed — try the paste-JSON option)")
 	}
 
 	var newIDs []int64
+	fetched := 0
 	for rank, rp := range posts {
 		a := rp.normalize()
 		a.SavedRank = rank // 0 = most recently saved (assumes API returns newest first)
 
-		var exists int64
-		if db.QueryRow(`SELECT id FROM articles WHERE substack_id = ?`, a.SubstackID).Scan(&exists) == nil {
+		var existingID int64
+		var existingBody string
+		err := db.QueryRow(`SELECT id, body_html FROM articles WHERE substack_id = ?`, a.SubstackID).Scan(&existingID, &existingBody)
+		alreadyExists := err == nil
+
+		if alreadyExists && strings.TrimSpace(existingBody) != "" {
 			res.Skipped++
 			continue
 		}
+
 		if cookie != "" {
+			if fetched > 0 {
+				time.Sleep(500 * time.Millisecond)
+			}
+			fetched++
 			if err := fetchBody(cookie, &a); err != nil {
-				res.Failed++
+				if alreadyExists {
+					res.Skipped++
+				} else {
+					res.Failed++
+				}
 				if len(res.Errors) < 5 {
 					res.Errors = append(res.Errors, fmt.Sprintf("%s: %v", a.Title, err))
 				}
-				// Still store metadata-only so it can surface (pitch from subtitle).
+				if alreadyExists {
+					continue
+				}
 			}
 		}
+
+		if alreadyExists && strings.TrimSpace(a.BodyHTML) != "" {
+			_, err := db.Exec(`UPDATE articles SET body_html = ?, plain_text = ?, word_count = ?, is_paywalled = ? WHERE id = ?`,
+				a.BodyHTML, a.PlainText, a.WordCount, boolToInt(a.IsPaywalled), existingID)
+			if err == nil {
+				res.New++
+				newIDs = append(newIDs, existingID)
+			}
+			continue
+		}
+
+		if alreadyExists {
+			res.Skipped++
+			continue
+		}
+
 		id, inserted, err := insertArticle(db, &a)
 		if err != nil {
 			res.Failed++
