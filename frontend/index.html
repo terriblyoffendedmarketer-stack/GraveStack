@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<!-- Login gate (shown only if APP_PASSWORD is set and not authed) -->
+<!-- Login gate -->
 <div id="login" class="screen hidden">
   <form id="login-form" class="login-box">
     <h1>GraveStack</h1>
@@ -22,33 +22,54 @@
   </form>
 </div>
 
-<!-- The article-of-the-day: the whole app. No menu, no list. -->
-<main id="reader" class="screen hidden">
-  <button id="gear" class="gear" aria-label="Settings">⚙</button>
+<!-- Home: curated surface -->
+<main id="home" class="screen hidden">
+  <header class="home-header">
+    <h1 class="home-logo">GraveStack</h1>
+    <button id="gear" class="gear" aria-label="Settings">&#9881;</button>
+  </header>
 
-  <article id="article">
-    <div id="cover" class="cover"></div>
-    <div class="pitch">
-      <h1 id="title"></h1>
-      <p id="pitch-line" class="pitch-line"></p>
-      <blockquote id="pull-quote" class="pull-quote"></blockquote>
-      <div id="meta" class="meta"></div>
-      <div class="scroll-cue">Keep reading ↓</div>
+  <!-- Featured article (big tile) -->
+  <section id="featured" class="featured" role="button" tabindex="0">
+    <div id="featured-cover" class="featured-cover"></div>
+    <div class="featured-body">
+      <div id="featured-thread" class="tag"></div>
+      <h2 id="featured-title" class="featured-title"></h2>
+      <p id="featured-context" class="featured-context"></p>
+      <p id="featured-preview" class="featured-preview"></p>
+      <div id="featured-meta" class="featured-meta"></div>
     </div>
-    <div id="body" class="body"></div>
-    <div id="foot" class="foot">
-      <p class="foot-done">That's the one for today.</p>
-      <a id="not-today" class="not-today" href="#">Not today →</a>
-    </div>
-  </article>
+  </section>
 
-  <!-- States that replace the article -->
-  <div id="dismissed" class="state hidden">
-    <div class="state-inner">
-      <h2>Saved for later.</h2>
-      <p>A fresh pick lands tomorrow. That's the whole game.</p>
-    </div>
-  </div>
+  <!-- Suggestions -->
+  <section id="suggestions" class="suggestions">
+    <h3 class="section-label">Also for you</h3>
+    <div id="suggestion-cards" class="suggestion-cards"></div>
+  </section>
+
+  <!-- Daily write-up -->
+  <section id="writeup-section" class="writeup-section hidden">
+    <h3 class="section-label">Today's thread</h3>
+    <p id="writeup" class="writeup-text"></p>
+  </section>
+
+  <!-- AI query -->
+  <section class="ask-section">
+    <h3 class="section-label">Explore your collection</h3>
+    <form id="ask-form" class="ask-form">
+      <input type="text" id="ask-input" placeholder="What do you want to explore?" autocomplete="off">
+      <button type="submit" class="ask-btn">&#8594;</button>
+    </form>
+    <div id="ask-result" class="ask-result hidden"></div>
+  </section>
+
+  <!-- Threads nav -->
+  <section id="threads-section" class="threads-section hidden">
+    <h3 class="section-label">Threads</h3>
+    <div id="threads-list" class="threads-list"></div>
+  </section>
+
+  <!-- Empty state -->
   <div id="empty" class="state hidden">
     <div class="state-inner">
       <h2>Nothing in the crypt yet.</h2>
@@ -58,22 +79,55 @@
   </div>
 </main>
 
-<!-- Settings: intentionally plain, buried behind the gear -->
+<!-- Reader (drill-down from home) -->
+<div id="reader" class="screen hidden">
+  <button class="reader-back" onclick="backToHome()">&#8592; Back</button>
+  <article id="article">
+    <div id="cover" class="cover"></div>
+    <div class="pitch">
+      <h1 id="title"></h1>
+      <p id="pitch-line" class="pitch-line"></p>
+      <blockquote id="pull-quote" class="pull-quote"></blockquote>
+      <div id="meta" class="meta"></div>
+    </div>
+    <div id="body" class="body"></div>
+    <div id="foot" class="foot">
+      <p class="foot-done">That's the one for today.</p>
+    </div>
+  </article>
+  <!-- Related articles (post-read) -->
+  <section id="related" class="related hidden">
+    <h3 class="section-label">Related reads</h3>
+    <div id="related-cards" class="suggestion-cards"></div>
+  </section>
+</div>
+
+<!-- Thread view -->
+<div id="thread-view" class="screen hidden">
+  <button class="reader-back" onclick="backToHome()">&#8592; Back</button>
+  <div class="thread-header">
+    <h2 id="thread-title"></h2>
+    <p id="thread-desc" class="thread-desc"></p>
+  </div>
+  <div id="thread-articles" class="thread-articles"></div>
+</div>
+
+<!-- Settings -->
 <div id="settings" class="screen hidden settings">
   <div class="settings-inner">
-    <button class="back" onclick="closeSettings()">← Back to today</button>
+    <button class="back" onclick="closeSettings()">&#8592; Back</button>
     <h2>Settings</h2>
 
     <section>
       <h3>Sync saved articles</h3>
       <label>Substack session cookie
-        <textarea id="cookie" rows="3" placeholder="connect.sid=… (paste from DevTools → Application → Cookies)"></textarea>
+        <textarea id="cookie" rows="3" placeholder="connect.sid=&#8230; (paste from DevTools &#8594; Application &#8594; Cookies)"></textarea>
       </label>
       <button id="sync-btn" onclick="doSync()">Sync now</button>
       <details>
         <summary>Endpoint drifted? Paste saved-list JSON instead</summary>
-        <p class="hint">Open your Substack “Saved” page, DevTools → Network, copy the JSON response, paste it here.</p>
-        <textarea id="saved-json" rows="4" placeholder='{"posts":[…]}'></textarea>
+        <p class="hint">Open your Substack "Saved" page, DevTools &#8594; Network, copy the JSON response, paste it here.</p>
+        <textarea id="saved-json" rows="4" placeholder='{"posts":[&#8230;]}'></textarea>
         <button onclick="doSyncJSON()">Import pasted JSON</button>
         <label>Or override the saved-list URL
           <input id="saved_list_url" type="text" placeholder="https://substack.com/api/v1/reader/posts/saved?limit=100">
@@ -88,7 +142,7 @@
         (localStorage), sent per request, never saved on the server. Without it, pitches
         fall back to the article's subtitle.</p>
       <label>API key
-        <input id="anthropic_key" type="password" placeholder="sk-ant-…" autocomplete="off">
+        <input id="anthropic_key" type="password" placeholder="sk-ant-&#8230;" autocomplete="off">
       </label>
       <button onclick="saveKey()">Save key in this browser</button>
       <p id="key-status" class="hint"></p>

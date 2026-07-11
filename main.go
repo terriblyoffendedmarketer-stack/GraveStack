@@ -58,7 +58,8 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("GET /api/session", s.handleSession)
 
-	// Core reading loop (all gated)
+	// Home + reading loop (all gated)
+	mux.HandleFunc("GET /api/home", s.auth.require(s.handleHome))
 	mux.HandleFunc("GET /api/today", s.auth.require(s.handleToday))
 	mux.HandleFunc("POST /api/reroll", s.auth.require(s.handleReroll))
 	mux.HandleFunc("POST /api/not-today", s.auth.require(s.handleNotToday))
@@ -140,6 +141,22 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		"authed":     s.auth.authed(r),
 		"needsLogin": s.auth.enabled(),
 	})
+}
+
+// ---- home ----
+
+func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfgForRequest(r)
+	home, err := buildHome(s.db, cfg)
+	if err != nil {
+		if err == errNoArticles {
+			writeJSON(w, http.StatusOK, map[string]any{"empty": true})
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, home)
 }
 
 // ---- reading loop ----
