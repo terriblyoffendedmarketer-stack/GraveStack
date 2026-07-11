@@ -700,7 +700,7 @@ func parseJSONFromResponse(s string, v any) error {
 }
 
 func loadAllArticles(db *sql.DB) ([]*Article, error) {
-	rows, err := db.Query(`SELECT ` + articleSelectCols + `
+	rows, err := db.Query(`SELECT ` + articleSelectCols + `, a.plain_text
 		FROM articles a LEFT JOIN pitches p ON p.article_id = a.id
 		ORDER BY a.id`)
 	if err != nil {
@@ -709,15 +709,21 @@ func loadAllArticles(db *sql.DB) ([]*Article, error) {
 	defer rows.Close()
 	var articles []*Article
 	for rows.Next() {
-		a, err := scanArticle(rows)
+		var a Article
+		var pitchLine, pullQuote, plainText sql.NullString
+		err := rows.Scan(
+			&a.ID, &a.SubstackID, &a.URL, &a.Subdomain, &a.Slug, &a.Title, &a.Subtitle,
+			&a.Author, &a.PublishedAt, &a.WordCount, &a.CoverImage, &a.BodyHTML,
+			&a.Topic, &a.IsPaywalled, &a.SavedRank, &a.SyncedAt, &pitchLine, &pullQuote,
+			&plainText,
+		)
 		if err != nil {
 			continue
 		}
-		// We need plain_text for analysis
-		var pt sql.NullString
-		db.QueryRow(`SELECT plain_text FROM articles WHERE id = ?`, a.ID).Scan(&pt)
-		a.PlainText = pt.String
-		articles = append(articles, a)
+		a.PitchLine = pitchLine.String
+		a.PullQuote = pullQuote.String
+		a.PlainText = plainText.String
+		articles = append(articles, &a)
 	}
 	return articles, nil
 }
