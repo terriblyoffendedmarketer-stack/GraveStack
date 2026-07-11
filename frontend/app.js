@@ -69,10 +69,10 @@ function renderFeatured(f) {
   const cover = $('featured-cover');
   if (a.cover_image_url) {
     cover.style.backgroundImage = `url("${a.cover_image_url}")`;
-    cover.classList.remove('empty');
+    cover.classList.remove('generated');
   } else {
-    cover.classList.add('empty');
-    cover.style.backgroundImage = '';
+    cover.style.backgroundImage = generatedCover(a.title || 'untitled');
+    cover.classList.add('generated');
   }
 
   $('featured-thread').textContent = f.thread || '';
@@ -164,9 +164,11 @@ function renderArticle(a) {
   const cover = $('cover');
   if (a.cover_image_url) {
     cover.style.backgroundImage = `url("${a.cover_image_url}")`;
-    cover.classList.remove('empty');
+    cover.classList.remove('empty', 'generated');
   } else {
-    cover.classList.add('empty');
+    cover.style.backgroundImage = generatedCover(a.title || 'untitled');
+    cover.classList.remove('empty');
+    cover.classList.add('generated');
   }
 
   $('title').textContent = a.title || '';
@@ -437,6 +439,22 @@ function escapeHTML(s) {
 
 function escapeAttr(s) {
   return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Generate a unique visual from a string (title). Produces a multi-stop
+// gradient with colors derived from the text, so every article without a
+// cover image gets its own distinct look.
+function generatedCover(text) {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) - h + text.charCodeAt(i)) | 0;
+  const abs = Math.abs(h);
+  const hue1 = abs % 360;
+  const hue2 = (hue1 + 40 + (abs % 60)) % 360;
+  const hue3 = (hue2 + 60 + (abs % 80)) % 360;
+  const sat = 25 + (abs % 30);
+  const light = 12 + (abs % 10);
+  const angle = abs % 360;
+  return `linear-gradient(${angle}deg, hsl(${hue1},${sat}%,${light}%) 0%, hsl(${hue2},${sat + 10}%,${light + 5}%) 50%, hsl(${hue3},${sat}%,${light + 3}%) 100%)`;
 }
 
 function urlBase64ToUint8Array(base64String) {

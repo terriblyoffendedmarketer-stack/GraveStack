@@ -43,7 +43,7 @@ body { overscroll-behavior-y: none; }
 .featured:hover, .featured:focus-visible { background: var(--card-hover); outline: none; }
 .featured-cover { width: 100%; aspect-ratio: 16/9; background-size: cover;
   background-position: center; background-color: #202024; }
-.featured-cover.empty { aspect-ratio: auto; height: 0; }
+.featured-cover.generated { background-size: 100% 100%; }
 .featured-body { padding: 20px 22px 24px; }
 .tag { display: inline-block; font-size: .72rem; text-transform: uppercase;
   letter-spacing: .06em; color: var(--accent); margin-bottom: 10px; font-weight: 600; }
