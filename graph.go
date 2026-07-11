@@ -129,8 +129,14 @@ func buildGraphOpts(db *sql.DB, cfg Config, rebuild bool) error {
 	log.Printf("graph: %d total articles, %d already analyzed, %d to analyze",
 		len(allArticles), len(existingMeta), len(toAnalyze))
 
-	if len(toAnalyze) == 0 && !rebuild {
-		log.Printf("graph: nothing new to analyze")
+	// Check if there's any work to do: new articles to analyze, or missing
+	// threads/relations that need creating.
+	var threadCount, relCount int
+	db.QueryRow(`SELECT COUNT(*) FROM threads`).Scan(&threadCount)
+	db.QueryRow(`SELECT COUNT(*) FROM article_relations`).Scan(&relCount)
+
+	if len(toAnalyze) == 0 && !rebuild && threadCount > 0 && relCount > 0 {
+		log.Printf("graph: nothing new to analyze, threads and relations exist")
 		return nil
 	}
 
@@ -180,7 +186,6 @@ func buildGraphOpts(db *sql.DB, cfg Config, rebuild bool) error {
 
 	// Phase 2: Threads — if no threads exist yet, create from scratch.
 	// Otherwise, place new articles into existing threads + check emergence.
-	var threadCount int
 	db.QueryRow(`SELECT COUNT(*) FROM threads`).Scan(&threadCount)
 
 	if threadCount == 0 {
@@ -208,7 +213,6 @@ func buildGraphOpts(db *sql.DB, cfg Config, rebuild bool) error {
 
 	// Phase 3: Relations — if none exist yet, create from scratch.
 	// Otherwise, find relations for new articles only.
-	var relCount int
 	db.QueryRow(`SELECT COUNT(*) FROM article_relations`).Scan(&relCount)
 
 	if relCount == 0 {
@@ -700,9 +704,11 @@ func parseJSONFromResponse(s string, v any) error {
 }
 
 func loadAllArticles(db *sql.DB) ([]*Article, error) {
-	rows, err := db.Query(`SELECT ` + articleSelectCols + `, a.plain_text
-		FROM articles a LEFT JOIN pitches p ON p.article_id = a.id
-		ORDER BY a.id`)
+	rows, err := db.Query(`SELECT a.id, a.substack_id, a.url, a.subdomain, a.slug,
+		a.title, a.subtitle, a.author, a.published_at, a.word_count,
+		a.cover_image_url, a.topic, a.is_paywalled, a.saved_rank, a.synced_at,
+		a.plain_text
+		FROM articles a ORDER BY a.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -710,18 +716,16 @@ func loadAllArticles(db *sql.DB) ([]*Article, error) {
 	var articles []*Article
 	for rows.Next() {
 		var a Article
-		var pitchLine, pullQuote, plainText sql.NullString
+		var plainText sql.NullString
 		err := rows.Scan(
-			&a.ID, &a.SubstackID, &a.URL, &a.Subdomain, &a.Slug, &a.Title, &a.Subtitle,
-			&a.Author, &a.PublishedAt, &a.WordCount, &a.CoverImage, &a.BodyHTML,
-			&a.Topic, &a.IsPaywalled, &a.SavedRank, &a.SyncedAt, &pitchLine, &pullQuote,
+			&a.ID, &a.SubstackID, &a.URL, &a.Subdomain, &a.Slug,
+			&a.Title, &a.Subtitle, &a.Author, &a.PublishedAt, &a.WordCount,
+			&a.CoverImage, &a.Topic, &a.IsPaywalled, &a.SavedRank, &a.SyncedAt,
 			&plainText,
 		)
 		if err != nil {
 			continue
 		}
-		a.PitchLine = pitchLine.String
-		a.PullQuote = pullQuote.String
 		a.PlainText = plainText.String
 		articles = append(articles, &a)
 	}

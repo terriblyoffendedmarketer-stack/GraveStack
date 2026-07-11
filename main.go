@@ -76,6 +76,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/subscribe", s.auth.require(s.handleSubscribe))
 
 	// Graph / intelligence
+	mux.HandleFunc("GET /api/graph-test", s.auth.require(s.handleGraphTest))
 	mux.HandleFunc("GET /api/graph-status", s.auth.require(s.handleGraphStatus))
 	mux.HandleFunc("POST /api/build-graph", s.auth.require(s.handleBuildGraph))
 	mux.HandleFunc("GET /api/threads", s.auth.require(s.handleThreads))
@@ -386,6 +387,20 @@ func isTruthy(s string) bool {
 
 // ---- graph / intelligence ----
 
+func (s *server) handleGraphTest(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfgForRequest(r)
+	if cfg.AnthropicKey == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"error": "no API key"})
+		return
+	}
+	result, err := callAnthropicRaw(cfg, "Reply with exactly: ok", "Test", 10)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"error": err.Error(), "model": cfg.AnthropicModel})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "response": result, "model": cfg.AnthropicModel})
+}
+
 func (s *server) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, graphStatus(s.db))
 }
@@ -393,19 +408,31 @@ func (s *server) handleGraphStatus(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleBuildGraph(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfgForRequest(r)
 	rebuild := isTruthy(r.URL.Query().Get("rebuild"))
-	go func() {
-		if err := buildGraphOpts(s.db, cfg, rebuild); err != nil {
-			log.Printf("build-graph: %v", err)
+	async := !isTruthy(r.URL.Query().Get("sync"))
+	if async {
+		go func() {
+			if err := buildGraphOpts(s.db, cfg, rebuild); err != nil {
+				log.Printf("build-graph: %v", err)
+			}
+		}()
+		status := graphStatus(s.db)
+		status["ok"] = true
+		status["started"] = true
+		if rebuild {
+			status["mode"] = "full rebuild"
+		} else {
+			status["mode"] = "incremental"
 		}
-	}()
+		writeJSON(w, http.StatusOK, status)
+		return
+	}
+	if err := buildGraphOpts(s.db, cfg, rebuild); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
 	status := graphStatus(s.db)
 	status["ok"] = true
-	status["started"] = true
-	if rebuild {
-		status["mode"] = "full rebuild"
-	} else {
-		status["mode"] = "incremental"
-	}
+	status["complete"] = true
 	writeJSON(w, http.StatusOK, status)
 }
 
