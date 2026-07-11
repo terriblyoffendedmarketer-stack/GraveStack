@@ -30,7 +30,7 @@ for an ADHD brain: the fix is design, not discipline.
 ### Deployed and working
 - **App live at** `https://gravestack.fly.dev` (Fly.io, Singapore, shared-cpu-1x,
   1GB persistent volume `gravedata` at `/data`)
-- **APP_PASSWORD:** `readmore2026`
+- **APP_PASSWORD:** set as Fly secret
 - **Fly secrets:** `APP_PASSWORD`, `CRON_TOKEN`, `ANTHROPIC_API_KEY` all set
 - **138 articles synced** from Substack saved list. 134 have full text, 4 missing
   (3 empty subdomain from first sync, 1 paywalled 403)
@@ -169,7 +169,7 @@ short comfort reads (maja, Erifili) and long aspirational reads (Sam Kriss).
 
 ## App password
 
-`APP_PASSWORD` is optional. Unset ⇒ the gate is open. Currently `readmore2026`.
+`APP_PASSWORD` is optional. Unset ⇒ the gate is open. Currently set as a Fly secret.
 
 ## Events (v2 fuel)
 
