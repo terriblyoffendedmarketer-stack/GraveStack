@@ -609,5 +609,37 @@ The writeup should feel like a knowledgeable friend saying "oh, you're intereste
 		writeJSON(w, http.StatusOK, map[string]any{"writeup": result, "main_pick": nil, "supporting": nil})
 		return
 	}
+
+	// Enrich with article details so the frontend doesn't need N+1 fetches.
+	articles := map[string]any{}
+	allPicks := []float64{}
+	if mp, ok := response["main_pick"].(float64); ok && mp > 0 {
+		allPicks = append(allPicks, mp)
+	}
+	if sup, ok := response["supporting"].([]any); ok {
+		for _, v := range sup {
+			if id, ok := v.(float64); ok && id > 0 {
+				allPicks = append(allPicks, id)
+			}
+		}
+	}
+	for _, fid := range allPicks {
+		id := int64(fid)
+		a, err := getArticle(s.db, id)
+		if err != nil {
+			continue
+		}
+		articles[fmt.Sprintf("%d", id)] = map[string]any{
+			"id":              a.ID,
+			"title":           a.Title,
+			"author":          a.Author,
+			"cover_image_url": a.CoverImage,
+			"word_count":      a.WordCount,
+			"pitch_line":      a.PitchLine,
+			"subtitle":        a.Subtitle,
+		}
+	}
+	response["articles"] = articles
+
 	writeJSON(w, http.StatusOK, response)
 }

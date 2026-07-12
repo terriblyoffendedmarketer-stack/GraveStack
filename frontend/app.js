@@ -258,36 +258,64 @@ $('ask-form').addEventListener('submit', async (e) => {
   try {
     const res = await api('/api/ask', { method: 'POST', body: JSON.stringify({ query: q }) });
     const data = await res.json();
+    const arts = data.articles || {};
 
     let html = '';
-    if (data.writeup) {
-      html += `<div class="ask-writeup">${escapeHTML(data.writeup)}</div>`;
+
+    // Hero cover from main pick.
+    const mainArt = arts[String(data.main_pick)];
+    if (mainArt && mainArt.cover_image_url) {
+      html += `<div class="ask-hero" style="background-image:url('${escapeAttr(mainArt.cover_image_url)}')" onclick="openArticle(${mainArt.id})"></div>`;
+    } else if (mainArt) {
+      html += `<div class="ask-hero ask-hero-gen" style="background-image:${generatedCover(mainArt.title || '')}" onclick="openArticle(${mainArt.id})"></div>`;
     }
-    if (data.main_pick || (data.supporting && data.supporting.length)) {
+
+    // Writeup with inline article links.
+    if (data.writeup) {
+      let writeupHTML = escapeHTML(data.writeup);
+      for (const [id, a] of Object.entries(arts)) {
+        const titleRe = new RegExp(escapeRegex(a.title), 'gi');
+        const link = `<a class="ask-article-link" href="#" onclick="event.preventDefault();openArticle(${a.id})">${escapeHTML(a.title)}</a>`;
+        writeupHTML = writeupHTML.replace(titleRe, link);
+      }
+      // Split into paragraphs.
+      writeupHTML = writeupHTML.split(/\n\n+/).map(p => `<p>${p}</p>`).join('');
+      html += `<div class="ask-writeup">${writeupHTML}</div>`;
+    }
+
+    // Inline article cards woven after the writeup.
+    const picks = [data.main_pick, ...(data.supporting || [])].filter(Boolean);
+    if (picks.length) {
       html += '<div class="ask-picks">';
-      const picks = [data.main_pick, ...(data.supporting || [])].filter(Boolean);
       for (const pid of picks) {
-        html += `<div class="suggestion-card" onclick="openArticle(${pid})">
-          <div class="suggestion-card-body">
-            <div class="suggestion-card-title" id="ask-pick-${pid}">Loading...</div>
-          </div></div>`;
+        const a = arts[String(pid)];
+        if (!a) continue;
+        let coverHTML = '';
+        if (a.cover_image_url) {
+          coverHTML = `<div class="ask-pick-cover" style="background-image:url('${escapeAttr(a.cover_image_url)}')"></div>`;
+        }
+        const ctx = a.pitch_line || a.subtitle || '';
+        html += `<div class="ask-pick-card" onclick="openArticle(${a.id})">
+          ${coverHTML}
+          <div class="ask-pick-body">
+            <div class="ask-pick-title">${escapeHTML(a.title)}</div>
+            <div class="ask-pick-author">${escapeHTML(a.author || '')}</div>
+            ${ctx ? `<div class="ask-pick-ctx">${escapeHTML(ctx)}</div>` : ''}
+          </div>
+        </div>`;
       }
       html += '</div>';
     }
-    resultBox.innerHTML = html;
 
-    // Fill in article titles.
-    const picks = [data.main_pick, ...(data.supporting || [])].filter(Boolean);
-    for (const pid of picks) {
-      api('/api/article/' + pid).then(r => r.json()).then(d => {
-        const el = document.getElementById('ask-pick-' + pid);
-        if (el && d.article) el.textContent = d.article.title;
-      }).catch(() => {});
-    }
+    resultBox.innerHTML = html;
   } catch (err) {
     resultBox.innerHTML = `<p class="hint">Something went wrong.</p>`;
   }
 });
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 // ---------- scroll events (v2 fuel) ----------
 window.addEventListener('scroll', throttle(() => {
@@ -354,6 +382,7 @@ async function openMagazine(threadSlug) {
   for (const it of items) {
     const a = it.article;
     const tile = document.createElement('div');
+    const isHero = it.tile_size === 'hero';
     tile.className = 'mag-tile mag-' + it.tile_size + (it.completed ? ' mag-completed' : '');
     tile.onclick = () => openArticle(a.id);
 
@@ -370,17 +399,29 @@ async function openMagazine(threadSlug) {
     else if (a.word_count) parts.push(readingTime(a.word_count));
 
     const threadTag = it.thread ? `<span class="mag-tile-thread">${escapeHTML(it.thread)}</span>` : '';
-    const ctxHTML = it.context && it.tile_size !== 'small'
-      ? `<p class="mag-tile-ctx">${escapeHTML(it.context)}</p>` : '';
     const completedBadge = it.completed ? '<span class="mag-tile-done">Read</span>' : '';
 
-    tile.innerHTML = `${coverHTML}
-      <div class="mag-tile-body">
-        ${threadTag}
-        <h3 class="mag-tile-title">${escapeHTML(a.title)}</h3>
-        ${ctxHTML}
-        <div class="mag-tile-meta">${escapeHTML(parts.join(' · '))}${completedBadge}</div>
-      </div>`;
+    if (isHero) {
+      // Hero tiles: big cover, prominent title, context, and reading preview.
+      const ctxHTML = it.context ? `<p class="mag-hero-ctx">${escapeHTML(it.context)}</p>` : '';
+      tile.innerHTML = `${coverHTML}
+        <div class="mag-tile-body">
+          ${threadTag}
+          <h2 class="mag-hero-title">${escapeHTML(a.title)}</h2>
+          ${ctxHTML}
+          <div class="mag-tile-meta">${escapeHTML(parts.join(' · '))}${completedBadge}</div>
+        </div>`;
+    } else {
+      const ctxHTML = it.context && it.tile_size !== 'small'
+        ? `<p class="mag-tile-ctx">${escapeHTML(it.context)}</p>` : '';
+      tile.innerHTML = `${coverHTML}
+        <div class="mag-tile-body">
+          ${threadTag}
+          <h3 class="mag-tile-title">${escapeHTML(a.title)}</h3>
+          ${ctxHTML}
+          <div class="mag-tile-meta">${escapeHTML(parts.join(' · '))}${completedBadge}</div>
+        </div>`;
+    }
     grid.appendChild(tile);
   }
 }

@@ -165,22 +165,34 @@ func assignTileSizes(items []magazineItem) {
 		maxScore = 1
 	}
 
+	// Four tiers: hero (full-width), large, medium, small.
 	for i := range items {
 		norm := items[i].Score / maxScore
 		switch {
-		case norm >= 0.7:
+		case norm >= 0.85:
+			items[i].TileSize = "hero"
+		case norm >= 0.55:
 			items[i].TileSize = "large"
-		case norm >= 0.3:
+		case norm >= 0.25:
 			items[i].TileSize = "medium"
 		default:
 			items[i].TileSize = "small"
 		}
 	}
 
+	// Cap hero tiles at ~3 and large at ~15% to keep visual rhythm.
+	heroCount := 0
+	maxHero := int(math.Max(2, math.Ceil(float64(len(items))*0.03)))
 	largeCount := 0
-	maxLarge := int(math.Max(2, math.Ceil(float64(len(items))*0.2)))
+	maxLarge := int(math.Max(3, math.Ceil(float64(len(items))*0.15)))
 	for i := range items {
-		if items[i].TileSize == "large" {
+		if items[i].TileSize == "hero" {
+			heroCount++
+			if heroCount > maxHero {
+				items[i].TileSize = "large"
+				largeCount++
+			}
+		} else if items[i].TileSize == "large" {
 			largeCount++
 			if largeCount > maxLarge {
 				items[i].TileSize = "medium"
