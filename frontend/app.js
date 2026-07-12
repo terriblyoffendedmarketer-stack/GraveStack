@@ -316,11 +316,22 @@ $('ask-form').addEventListener('submit', async (e) => {
       html += `<div class="ask-saved">Saved as "<a href="#" onclick="event.preventDefault();openIssue(${issueId || data.issue?.id})">${escapeHTML(issueTitle)}</a>"${cachedLabel}</div>`;
     }
 
+    // New question button so the user can ask again without scrolling back up.
+    html += `<div class="ask-again"><button class="ask-again-btn" onclick="clearAskResult()">Ask another question</button></div>`;
+
     resultBox.innerHTML = html;
+    $('ask-input').value = '';
   } catch (err) {
     resultBox.innerHTML = `<p class="hint">Something went wrong.</p>`;
   }
 });
+
+function clearAskResult() {
+  hide($('ask-result'));
+  $('ask-input').value = '';
+  $('ask-input').focus();
+  document.querySelector('.ask-section').scrollIntoView({ behavior: 'smooth' });
+}
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

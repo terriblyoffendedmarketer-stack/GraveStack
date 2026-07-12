@@ -283,6 +283,10 @@ body { overscroll-behavior-y: none; }
   background: rgba(201,168,106,.08); border: 1px solid rgba(201,168,106,.2);
   font-size: .8rem; color: var(--muted); }
 .ask-saved a { color: var(--accent); text-decoration: none; }
+.ask-again { margin-top: 16px; text-align: center; }
+.ask-again-btn { background: transparent; border: 1px solid var(--line); color: var(--muted);
+  padding: 10px 20px; border-radius: 10px; font-size: .85rem; cursor: pointer; transition: all .15s; }
+.ask-again-btn:hover { border-color: var(--accent); color: var(--fg); }
 
 /* Magazine link on home */
 .magazine-link-section { max-width: var(--max-w); margin: 24px auto 0; padding: 0 20px 40px;
