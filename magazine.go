@@ -2,8 +2,9 @@ package main
 
 import (
 	"database/sql"
-	"math"
 	"net/http"
+	"sort"
+	"time"
 )
 
 type magazineItem struct {
@@ -19,13 +20,13 @@ type magazineItem struct {
 }
 
 type magazineArticle struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Subtitle  string `json:"subtitle"`
-	Author    string `json:"author"`
-	WordCount int    `json:"word_count"`
+	ID         int64  `json:"id"`
+	Title      string `json:"title"`
+	Subtitle   string `json:"subtitle"`
+	Author     string `json:"author"`
+	WordCount  int    `json:"word_count"`
 	CoverImage string `json:"cover_image_url"`
-	PitchLine string `json:"pitch_line"`
+	PitchLine  string `json:"pitch_line"`
 }
 
 func (s *server) handleMagazine(w http.ResponseWriter, r *http.Request) {
@@ -70,8 +71,7 @@ func buildMagazine(db *sql.DB, threadFilter string) ([]magazineItem, error) {
 			) eng ON eng.article_id = a.id
 			LEFT JOIN (
 				SELECT DISTINCT article_id FROM events WHERE type = 'completed'
-			) comp ON comp.article_id = a.id
-			ORDER BY COALESCE(eng.score, 0) DESC, a.published_at DESC`
+			) comp ON comp.article_id = a.id`
 		args = []any{threadFilter}
 	} else {
 		query = `SELECT a.id, a.title, a.subtitle, a.author, a.word_count, a.cover_image_url,
@@ -99,8 +99,7 @@ func buildMagazine(db *sql.DB, threadFilter string) ([]magazineItem, error) {
 			) eng ON eng.article_id = a.id
 			LEFT JOIN (
 				SELECT DISTINCT article_id FROM events WHERE type = 'completed'
-			) comp ON comp.article_id = a.id
-			ORDER BY COALESCE(eng.score, 0) DESC, a.published_at DESC`
+			) comp ON comp.article_id = a.id`
 	}
 
 	rows, err := db.Query(query, args...)
@@ -132,71 +131,95 @@ func buildMagazine(db *sql.DB, threadFilter string) ([]magazineItem, error) {
 		items = append(items, it)
 	}
 
-	assignTileSizes(items)
+	layoutMagazine(items)
 	return items, nil
 }
 
-func assignTileSizes(items []magazineItem) {
+// layoutMagazine assigns tile sizes using a rhythm-based approach rather
+// than pure score thresholds. This guarantees visual variety regardless
+// of how clustered the scores are.
+func layoutMagazine(items []magazineItem) {
 	if len(items) == 0 {
 		return
 	}
 
+	// Add richness bonus to engagement score so articles with cover images
+	// and context get a boost for premium slot selection.
 	for i := range items {
-		richness := 0.0
 		if items[i].Article.CoverImage != "" {
-			richness += 2
+			items[i].Score += 2
 		}
 		if items[i].Context != "" {
-			richness += 1
+			items[i].Score += 1
 		}
 		if items[i].ReadTime > 8 {
-			richness += 1
-		}
-		items[i].Score += richness
-	}
-
-	var maxScore float64
-	for _, it := range items {
-		if it.Score > maxScore {
-			maxScore = it.Score
+			items[i].Score += 1
 		}
 	}
-	if maxScore == 0 {
-		maxScore = 1
+
+	// Daily rotation: use day-of-year as a seed to shift article ordering
+	// so tiles don't become stale even without new reading data.
+	dayOfYear := time.Now().UTC().YearDay()
+	rotation := dayOfYear % max(1, len(items))
+
+	// Sort by score descending — this determines which articles get
+	// the premium (hero/large) layout positions.
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].Score > items[j].Score
+	})
+
+	// Rotate the tail so different articles surface on different days.
+	// Keep the top 3 stable (they earned their spot via engagement).
+	if len(items) > 5 {
+		rest := items[3:]
+		rot := rotation % max(1, len(rest))
+		rotated := make([]magazineItem, len(rest))
+		copy(rotated, rest[rot:])
+		copy(rotated[len(rest)-rot:], rest[:rot])
+		copy(items[3:], rotated)
 	}
 
-	// Four tiers: hero (full-width), large, medium, small.
+	// Assign sizes using a fixed rhythm pattern that repeats.
+	// Pattern: hero, small, medium, small, large, small, small, medium,
+	//          small, medium, large, small, small, medium, small, hero, ...
+	// This creates visual punctuation: a big tile every ~8 items,
+	// a large tile every ~5, mediums filling gaps, smalls as texture.
+	rhythm := []string{
+		"hero", "small", "medium", "small", "large", "small", "small", "medium",
+		"small", "medium", "large", "small", "small", "medium", "small", "hero",
+	}
+
 	for i := range items {
-		norm := items[i].Score / maxScore
-		switch {
-		case norm >= 0.85:
-			items[i].TileSize = "hero"
-		case norm >= 0.55:
-			items[i].TileSize = "large"
-		case norm >= 0.25:
-			items[i].TileSize = "medium"
-		default:
-			items[i].TileSize = "small"
-		}
+		items[i].TileSize = rhythm[i%len(rhythm)]
 	}
 
-	// Cap hero tiles at ~3 and large at ~15% to keep visual rhythm.
-	heroCount := 0
-	maxHero := int(math.Max(2, math.Ceil(float64(len(items))*0.03)))
-	largeCount := 0
-	maxLarge := int(math.Max(3, math.Ceil(float64(len(items))*0.15)))
+	// Completed articles get demoted one tier — they're still visible
+	// but shouldn't dominate the visual space.
 	for i := range items {
-		if items[i].TileSize == "hero" {
-			heroCount++
-			if heroCount > maxHero {
+		if items[i].Completed {
+			switch items[i].TileSize {
+			case "hero":
 				items[i].TileSize = "large"
-				largeCount++
-			}
-		} else if items[i].TileSize == "large" {
-			largeCount++
-			if largeCount > maxLarge {
+			case "large":
 				items[i].TileSize = "medium"
 			}
 		}
 	}
+
+	// Verify hero tiles have enough content to look good — if an article
+	// has no cover AND no context, demote it from hero to large.
+	for i := range items {
+		if items[i].TileSize == "hero" {
+			if items[i].Article.CoverImage == "" && items[i].Context == "" {
+				items[i].TileSize = "large"
+			}
+		}
+	}
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

@@ -238,6 +238,7 @@ body { overscroll-behavior-y: none; }
 
 .mag-tile-ctx { color: var(--muted); font-size: .78rem; line-height: 1.4; margin: 0 0 8px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mag-tile-ctx-lg { font-size: .85rem; -webkit-line-clamp: 3; color: #b8b8bc; }
 
 .mag-tile-meta { color: var(--muted); font-size: .7rem; display: flex;
   align-items: center; gap: 6px; flex-wrap: wrap; }

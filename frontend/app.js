@@ -552,8 +552,18 @@ async function openMagazine(threadSlug) {
           ${ctxHTML}
           <div class="mag-tile-meta">${escapeHTML(parts.join(' · '))}${completedBadge}</div>
         </div>`;
+    } else if (it.tile_size === 'large') {
+      const ctxHTML = it.context
+        ? `<p class="mag-tile-ctx mag-tile-ctx-lg">${escapeHTML(it.context)}</p>` : '';
+      tile.innerHTML = `${coverHTML}
+        <div class="mag-tile-body">
+          ${threadTag}
+          <h3 class="mag-tile-title">${escapeHTML(a.title)}</h3>
+          ${ctxHTML}
+          <div class="mag-tile-meta">${escapeHTML(parts.join(' · '))}${completedBadge}</div>
+        </div>`;
     } else {
-      const ctxHTML = it.context && it.tile_size !== 'small'
+      const ctxHTML = it.context && it.tile_size === 'medium'
         ? `<p class="mag-tile-ctx">${escapeHTML(it.context)}</p>` : '';
       tile.innerHTML = `${coverHTML}
         <div class="mag-tile-body">
