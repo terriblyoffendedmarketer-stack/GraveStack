@@ -35,7 +35,7 @@ function showLogin() {
 }
 
 function hideAll() {
-  for (const id of ['login', 'home', 'reader', 'thread-view', 'settings']) hide($(id));
+  for (const id of ['login', 'home', 'reader', 'thread-view', 'magazine', 'settings']) hide($(id));
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -313,6 +313,83 @@ window.addEventListener('visibilitychange', () => {
     }));
   }
 });
+
+// ---------- magazine view ----------
+async function openMagazine(threadSlug) {
+  hideAll(); show($('magazine'));
+  window.scrollTo(0, 0);
+
+  const grid = $('magazine-grid');
+  grid.innerHTML = '<div class="loading">Loading</div>';
+
+  const filterBar = $('magazine-filters');
+  filterBar.innerHTML = '';
+
+  const url = threadSlug ? '/api/magazine?thread=' + encodeURIComponent(threadSlug) : '/api/magazine';
+  const res = await api(url);
+  const items = await res.json();
+
+  // Build thread filter chips.
+  const threads = new Map();
+  for (const it of items) {
+    if (it.thread && !threads.has(it.thread_slug)) {
+      threads.set(it.thread_slug, it.thread);
+    }
+  }
+  if (threads.size > 0) {
+    const allChip = document.createElement('button');
+    allChip.className = 'mag-filter' + (!threadSlug ? ' active' : '');
+    allChip.textContent = 'All';
+    allChip.onclick = () => openMagazine();
+    filterBar.appendChild(allChip);
+    for (const [slug, title] of threads) {
+      const chip = document.createElement('button');
+      chip.className = 'mag-filter' + (threadSlug === slug ? ' active' : '');
+      chip.textContent = title;
+      chip.onclick = () => openMagazine(slug);
+      filterBar.appendChild(chip);
+    }
+  }
+
+  grid.innerHTML = '';
+  if (!items.length) {
+    grid.innerHTML = '<p class="hint" style="grid-column:1/-1;text-align:center;padding:40px">No articles yet. Sync some first.</p>';
+    return;
+  }
+
+  for (const it of items) {
+    const a = it.article;
+    const tile = document.createElement('div');
+    tile.className = 'mag-tile mag-' + it.tile_size + (it.completed ? ' mag-completed' : '');
+    tile.onclick = () => openArticle(a.id);
+
+    let coverHTML = '';
+    if (a.cover_image_url) {
+      coverHTML = `<div class="mag-tile-cover" style="background-image:url('${escapeAttr(a.cover_image_url)}')"></div>`;
+    } else {
+      coverHTML = `<div class="mag-tile-cover mag-tile-cover-gen" style="background-image:${generatedCover(a.title || 'untitled')}"></div>`;
+    }
+
+    const parts = [];
+    if (a.author) parts.push(a.author);
+    if (it.read_time) parts.push(it.read_time + ' min');
+    else if (a.word_count) parts.push(readingTime(a.word_count));
+
+    const threadTag = it.thread ? `<span class="mag-tile-thread">${escapeHTML(it.thread)}</span>` : '';
+    const ctxHTML = it.context && it.tile_size !== 'small'
+      ? `<p class="mag-tile-ctx">${escapeHTML(it.context)}</p>` : '';
+    const completedBadge = it.completed ? '<span class="mag-tile-done">Read</span>' : '';
+
+    tile.innerHTML = `${coverHTML}
+      <div class="mag-tile-body">
+        ${threadTag}
+        <h3 class="mag-tile-title">${escapeHTML(a.title)}</h3>
+        ${ctxHTML}
+        <div class="mag-tile-meta">${escapeHTML(parts.join(' · '))}${completedBadge}</div>
+      </div>`;
+    grid.appendChild(tile);
+  }
+}
 
 // ---------- settings ----------
 function openSettings() {

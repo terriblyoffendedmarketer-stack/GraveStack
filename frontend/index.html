@@ -69,6 +69,11 @@
     <div id="threads-list" class="threads-list"></div>
   </section>
 
+  <!-- Magazine link -->
+  <section class="magazine-link-section">
+    <button class="magazine-link" onclick="openMagazine()">Browse the magazine &#8594;</button>
+  </section>
+
   <!-- Empty state -->
   <div id="empty" class="state hidden">
     <div class="state-inner">
@@ -100,6 +105,16 @@
     <h3 class="section-label">Related reads</h3>
     <div id="related-cards" class="suggestion-cards"></div>
   </section>
+</div>
+
+<!-- Magazine view -->
+<div id="magazine" class="screen hidden">
+  <div class="mag-header">
+    <button class="reader-back" onclick="backToHome()" style="position:static;background:transparent;backdrop-filter:none;color:var(--muted);padding:0">&#8592; Back</button>
+    <h2 class="mag-title">Magazine</h2>
+  </div>
+  <div id="magazine-filters" class="mag-filters"></div>
+  <div id="magazine-grid" class="mag-grid"></div>
 </div>
 
 <!-- Thread view -->
