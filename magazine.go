@@ -143,17 +143,44 @@ func layoutMagazine(items []magazineItem) {
 		return
 	}
 
-	// Add richness bonus to engagement score so articles with cover images
-	// and context get a boost for premium slot selection.
+	// Intelligent default scoring: even without event data, rank articles
+	// using signals from the collection analysis and user preferences.
 	for i := range items {
+		// Visual richness — articles with covers look better in large tiles.
 		if items[i].Article.CoverImage != "" {
+			items[i].Score += 3
+		}
+		// Context richness — articles with AI-generated context have more
+		// to show in premium positions.
+		if items[i].Context != "" {
 			items[i].Score += 2
 		}
-		if items[i].Context != "" {
+		// Thread membership — threaded articles have more context.
+		if items[i].Thread != "" {
 			items[i].Score += 1
 		}
-		if items[i].ReadTime > 8 {
+		// Read time sweet spot: 5-12 min reads are most likely to be started
+		// and finished (ADHD-friendly). Very long reads get a small penalty,
+		// very short ones get a small boost.
+		rt := items[i].ReadTime
+		if rt == 0 && items[i].Article.WordCount > 0 {
+			rt = items[i].Article.WordCount / 220
+		}
+		switch {
+		case rt >= 5 && rt <= 12:
+			items[i].Score += 2
+		case rt > 0 && rt < 5:
 			items[i].Score += 1
+		case rt > 20:
+			items[i].Score -= 1
+		}
+		// Subtitle/pitch presence — more content to display.
+		if items[i].Article.PitchLine != "" {
+			items[i].Score += 1
+		}
+		// Completed articles get penalized so unread content surfaces.
+		if items[i].Completed {
+			items[i].Score -= 3
 		}
 	}
 

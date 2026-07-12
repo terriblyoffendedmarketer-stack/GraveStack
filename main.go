@@ -487,30 +487,40 @@ func (s *server) handleThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Collect article IDs and contexts first, then close the cursor
+	// before querying individual articles (single-connection SQLite).
 	artRows, err := s.db.Query(`SELECT at.article_id, at.context
 		FROM article_threads at WHERE at.thread_id = ? ORDER BY at.relevance DESC`, t.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer artRows.Close()
-
-	type threadArticle struct {
-		Article       *Article `json:"article"`
-		ThreadContext string   `json:"thread_context"`
+	type artRef struct {
+		id  int64
+		ctx string
 	}
-	var articles []threadArticle
+	var refs []artRef
 	for artRows.Next() {
 		var aid int64
 		var ctx sql.NullString
 		if err := artRows.Scan(&aid, &ctx); err != nil {
 			continue
 		}
-		a, err := getArticle(s.db, aid)
+		refs = append(refs, artRef{aid, ctx.String})
+	}
+	artRows.Close()
+
+	type threadArticle struct {
+		Article       *Article `json:"article"`
+		ThreadContext string   `json:"thread_context"`
+	}
+	var articles []threadArticle
+	for _, ref := range refs {
+		a, err := getArticle(s.db, ref.id)
 		if err != nil {
 			continue
 		}
-		articles = append(articles, threadArticle{Article: a, ThreadContext: ctx.String})
+		articles = append(articles, threadArticle{Article: a, ThreadContext: ref.ctx})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"thread": t, "articles": articles})
 }
@@ -522,7 +532,7 @@ func (s *server) handleRelated(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.db.Query(`
+	relRows, err := s.db.Query(`
 		SELECT ar.relation, ar.strength, ar.reason,
 			CASE WHEN ar.article_a = ? THEN ar.article_b ELSE ar.article_a END as related_id
 		FROM article_relations ar
@@ -533,7 +543,20 @@ func (s *server) handleRelated(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	type relRef struct {
+		rel, reason string
+		strength    float64
+		relID       int64
+	}
+	var relRefs []relRef
+	for relRows.Next() {
+		var r relRef
+		if err := relRows.Scan(&r.rel, &r.strength, &r.reason, &r.relID); err != nil {
+			continue
+		}
+		relRefs = append(relRefs, r)
+	}
+	relRows.Close()
 
 	type related struct {
 		Article  *Article `json:"article"`
@@ -542,18 +565,12 @@ func (s *server) handleRelated(w http.ResponseWriter, r *http.Request) {
 		Reason   string   `json:"reason"`
 	}
 	var results []related
-	for rows.Next() {
-		var rel, reason string
-		var strength float64
-		var relID int64
-		if err := rows.Scan(&rel, &strength, &reason, &relID); err != nil {
-			continue
-		}
-		a, err := getArticle(s.db, relID)
+	for _, r := range relRefs {
+		a, err := getArticle(s.db, r.relID)
 		if err != nil {
 			continue
 		}
-		results = append(results, related{Article: a, Relation: rel, Strength: strength, Reason: reason})
+		results = append(results, related{Article: a, Relation: r.rel, Strength: r.strength, Reason: r.reason})
 	}
 	writeJSON(w, http.StatusOK, results)
 }

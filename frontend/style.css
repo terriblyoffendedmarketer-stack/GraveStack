@@ -198,7 +198,8 @@ body { overscroll-behavior-y: none; }
 .mag-filter.active { background: var(--accent); color: #1a1a1a; border-color: var(--accent); }
 
 .mag-grid { max-width: 900px; margin: 0 auto; padding: 8px 16px 60px;
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+  grid-auto-flow: dense; }
 @media (min-width: 640px) { .mag-grid { grid-template-columns: repeat(3, 1fr); } }
 
 .mag-tile { background: var(--card); border-radius: 12px;
@@ -216,8 +217,8 @@ body { overscroll-behavior-y: none; }
   line-height: 1.5; margin: 0 0 12px;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
-/* Large: spans 2 columns on 3-col layout */
-@media (min-width: 640px) { .mag-large { grid-column: span 2; } }
+/* Large: spans 2 columns */
+.mag-large { grid-column: span 2; }
 .mag-large .mag-tile-cover { aspect-ratio: 16/9; }
 
 .mag-tile-cover { width: 100%; background-size: cover; background-position: center;
