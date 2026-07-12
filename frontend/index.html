@@ -69,6 +69,12 @@
     <div id="threads-list" class="threads-list"></div>
   </section>
 
+  <!-- Past issues -->
+  <section id="issues-section" class="issues-section hidden">
+    <h3 class="section-label">Past issues</h3>
+    <div id="issues-list" class="issues-list"></div>
+  </section>
+
   <!-- Magazine link -->
   <section class="magazine-link-section">
     <button class="magazine-link" onclick="openMagazine()">Browse the magazine &#8594;</button>
@@ -105,6 +111,12 @@
     <h3 class="section-label">Related reads</h3>
     <div id="related-cards" class="suggestion-cards"></div>
   </section>
+</div>
+
+<!-- Issue view -->
+<div id="issue-view" class="screen hidden">
+  <button class="reader-back" onclick="backToHome()" style="position:static;background:transparent;backdrop-filter:none;color:var(--muted);padding:16px 20px 0">&#8592; Back</button>
+  <div id="issue-content" class="issue-content"></div>
 </div>
 
 <!-- Magazine view -->

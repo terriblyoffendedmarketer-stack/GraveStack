@@ -35,7 +35,7 @@ function showLogin() {
 }
 
 function hideAll() {
-  for (const id of ['login', 'home', 'reader', 'thread-view', 'magazine', 'settings']) hide($(id));
+  for (const id of ['login', 'home', 'reader', 'thread-view', 'magazine', 'issue-view', 'settings']) hide($(id));
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -61,6 +61,7 @@ async function loadHome() {
   renderSuggestions(data.suggestions || []);
   renderWriteup(data.writeup);
   renderThreadsNav(data.threads || []);
+  loadIssues();
 }
 
 function renderFeatured(f) {
@@ -307,6 +308,14 @@ $('ask-form').addEventListener('submit', async (e) => {
       html += '</div>';
     }
 
+    // Show saved-as-issue badge.
+    const issueId = data.issue ? data.issue.id : (data.cached ? data.issue?.id : null);
+    const issueTitle = data.issue ? data.issue.title : (data.title || '');
+    if (issueId || data.cached) {
+      const cachedLabel = data.cached ? ' · from archive' : '';
+      html += `<div class="ask-saved">Saved as "<a href="#" onclick="event.preventDefault();openIssue(${issueId || data.issue?.id})">${escapeHTML(issueTitle)}</a>"${cachedLabel}</div>`;
+    }
+
     resultBox.innerHTML = html;
   } catch (err) {
     resultBox.innerHTML = `<p class="hint">Something went wrong.</p>`;
@@ -341,6 +350,138 @@ window.addEventListener('visibilitychange', () => {
     }));
   }
 });
+
+// ---------- issues ----------
+async function loadIssues() {
+  try {
+    const res = await api('/api/issues');
+    const issues = await res.json();
+    const section = $('issues-section');
+    const list = $('issues-list');
+    if (!issues || !issues.length) { hide(section); return; }
+    show(section);
+    list.innerHTML = '';
+    for (const issue of issues.slice(0, 6)) {
+      const card = document.createElement('div');
+      card.className = 'issue-card';
+      card.onclick = () => openIssue(issue.id);
+      const date = new Date(issue.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      card.innerHTML = `<div class="issue-card-title">${escapeHTML(issue.title)}</div>
+        <div class="issue-card-meta">${escapeHTML(date)} · ${escapeHTML(issue.query)}</div>`;
+      list.appendChild(card);
+    }
+    if (issues.length > 6) {
+      const more = document.createElement('button');
+      more.className = 'issue-more';
+      more.textContent = `View all ${issues.length} issues`;
+      more.onclick = () => openAllIssues();
+      list.appendChild(more);
+    }
+  } catch (e) {}
+}
+
+async function openIssue(id) {
+  hideAll(); show($('issue-view'));
+  window.scrollTo(0, 0);
+  const content = $('issue-content');
+  content.innerHTML = '<div class="loading">Loading</div>';
+
+  const res = await api('/api/issue/' + id);
+  const issue = await res.json();
+  const arts = issue.articles || {};
+
+  let html = '';
+
+  // Hero cover from main pick.
+  const mainArt = arts[String(issue.main_pick)];
+  if (mainArt && mainArt.cover_image_url) {
+    html += `<div class="ask-hero" style="background-image:url('${escapeAttr(mainArt.cover_image_url)}')" onclick="openArticle(${mainArt.id})"></div>`;
+  } else if (mainArt) {
+    html += `<div class="ask-hero ask-hero-gen" style="background-image:${generatedCover(mainArt.title || '')}" onclick="openArticle(${mainArt.id})"></div>`;
+  }
+
+  // Title and date.
+  const date = new Date(issue.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  html += `<div class="issue-header">
+    <h2 class="issue-title">${escapeHTML(issue.title)}</h2>
+    <div class="issue-date">${escapeHTML(date)} · "${escapeHTML(issue.query)}"</div>
+  </div>`;
+
+  // Writeup with inline article links.
+  if (issue.writeup) {
+    let writeupHTML = escapeHTML(issue.writeup);
+    for (const [aid, a] of Object.entries(arts)) {
+      const titleRe = new RegExp(escapeRegex(a.title), 'gi');
+      const link = `<a class="ask-article-link" href="#" onclick="event.preventDefault();openArticle(${a.id})">${escapeHTML(a.title)}</a>`;
+      writeupHTML = writeupHTML.replace(titleRe, link);
+    }
+    writeupHTML = writeupHTML.split(/\n\n+/).map(p => `<p>${p}</p>`).join('');
+    html += `<div class="ask-writeup">${writeupHTML}</div>`;
+  }
+
+  // Article pick cards.
+  const picks = [issue.main_pick, ...(issue.supporting || [])].filter(Boolean);
+  if (picks.length) {
+    html += '<div class="ask-picks">';
+    for (const pid of picks) {
+      const a = arts[String(pid)];
+      if (!a) continue;
+      let coverHTML = '';
+      if (a.cover_image_url) {
+        coverHTML = `<div class="ask-pick-cover" style="background-image:url('${escapeAttr(a.cover_image_url)}')"></div>`;
+      }
+      const ctx = a.pitch_line || a.subtitle || '';
+      html += `<div class="ask-pick-card" onclick="openArticle(${a.id})">
+        ${coverHTML}
+        <div class="ask-pick-body">
+          <div class="ask-pick-title">${escapeHTML(a.title)}</div>
+          <div class="ask-pick-author">${escapeHTML(a.author || '')}</div>
+          ${ctx ? `<div class="ask-pick-ctx">${escapeHTML(ctx)}</div>` : ''}
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Delete button.
+  html += `<div class="issue-actions">
+    <button class="issue-delete" onclick="deleteIssue(${issue.id})">Delete this issue</button>
+  </div>`;
+
+  content.innerHTML = html;
+}
+
+async function deleteIssue(id) {
+  await api('/api/issue/' + id, { method: 'DELETE' });
+  backToHome();
+}
+
+async function openAllIssues() {
+  hideAll(); show($('issue-view'));
+  window.scrollTo(0, 0);
+  const content = $('issue-content');
+  content.innerHTML = '<div class="loading">Loading</div>';
+
+  const res = await api('/api/issues');
+  const issues = await res.json();
+
+  let html = '<div class="issue-header"><h2 class="issue-title">All Issues</h2></div>';
+  if (!issues || !issues.length) {
+    html += '<p class="hint" style="text-align:center;padding:40px">No issues yet. Ask a question to create one.</p>';
+  } else {
+    html += '<div class="issues-archive">';
+    for (const issue of issues) {
+      const date = new Date(issue.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      html += `<div class="issue-archive-card" onclick="openIssue(${issue.id})">
+        <div class="issue-card-title">${escapeHTML(issue.title)}</div>
+        <div class="issue-card-meta">${escapeHTML(date)} · "${escapeHTML(issue.query)}"</div>
+        <div class="issue-card-preview">${escapeHTML((issue.writeup || '').slice(0, 120))}…</div>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  content.innerHTML = html;
+}
 
 // ---------- magazine view ----------
 async function openMagazine(threadSlug) {

@@ -249,6 +249,39 @@ body { overscroll-behavior-y: none; }
 .mag-completed { opacity: .6; }
 .mag-completed:hover { opacity: .85; }
 
+/* Issues section on home */
+.issues-section { max-width: var(--max-w); margin: 24px auto 0; padding: 0 20px; }
+.issues-list { display: flex; flex-direction: column; gap: 8px; }
+.issue-card { background: var(--card); border-radius: 10px; padding: 14px 16px;
+  cursor: pointer; transition: background .15s; }
+.issue-card:hover { background: var(--card-hover); }
+.issue-card-title { font-family: var(--serif); font-size: 1rem; margin: 0 0 4px; }
+.issue-card-meta { color: var(--muted); font-size: .75rem; }
+.issue-card-preview { color: var(--muted); font-size: .8rem; line-height: 1.4; margin-top: 6px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.issue-more { background: transparent; border: none; color: var(--accent);
+  font-size: .85rem; cursor: pointer; padding: 8px 0; text-align: left; }
+
+/* Issue detail view */
+.issue-content { max-width: var(--max-w); margin: 0 auto; padding: 0 20px 60px; }
+.issue-header { margin: 16px 0 20px; }
+.issue-title { font-family: var(--serif); font-size: 1.5rem; line-height: 1.2; margin: 0 0 6px; }
+.issue-date { color: var(--muted); font-size: .8rem; }
+.issue-actions { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
+.issue-delete { background: transparent; border: 1px solid var(--line); color: var(--muted);
+  padding: 8px 16px; border-radius: 8px; font-size: .82rem; cursor: pointer; }
+.issue-delete:hover { border-color: #e0685f; color: #e0685f; }
+.issues-archive { display: flex; flex-direction: column; gap: 10px; }
+.issue-archive-card { background: var(--card); border-radius: 10px; padding: 16px 18px;
+  cursor: pointer; transition: background .15s; }
+.issue-archive-card:hover { background: var(--card-hover); }
+
+/* Ask saved badge */
+.ask-saved { margin-top: 14px; padding: 10px 14px; border-radius: 8px;
+  background: rgba(201,168,106,.08); border: 1px solid rgba(201,168,106,.2);
+  font-size: .8rem; color: var(--muted); }
+.ask-saved a { color: var(--accent); text-decoration: none; }
+
 /* Magazine link on home */
 .magazine-link-section { max-width: var(--max-w); margin: 24px auto 0; padding: 0 20px 40px;
   text-align: center; }

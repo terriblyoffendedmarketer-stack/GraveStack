@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -83,8 +82,12 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/threads", s.auth.require(s.handleThreads))
 	mux.HandleFunc("GET /api/thread/{slug}", s.auth.require(s.handleThread))
 	mux.HandleFunc("GET /api/article/{id}/related", s.auth.require(s.handleRelated))
-	mux.HandleFunc("POST /api/ask", s.auth.require(s.handleAsk))
+	mux.HandleFunc("POST /api/ask", s.auth.require(s.handleAskWithIssues))
 	mux.HandleFunc("GET /api/magazine", s.auth.require(s.handleMagazine))
+	mux.HandleFunc("GET /api/issues", s.auth.require(s.handleListIssues))
+	mux.HandleFunc("GET /api/issue/{id}", s.auth.require(s.handleGetIssue))
+	mux.HandleFunc("DELETE /api/issue/{id}", s.auth.require(s.handleDeleteIssue))
+	mux.HandleFunc("POST /api/issue/{id}/merge/{other}", s.auth.require(s.handleMergeIssues))
 
 	// External cron trigger (token-protected, no session needed)
 	mux.HandleFunc("POST /internal/cron/daily", s.handleCron)
@@ -555,91 +558,4 @@ func (s *server) handleRelated(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 
-func (s *server) handleAsk(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Query string `json:"query"`
-	}
-	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Query) == "" {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	cfg := s.cfgForRequest(r)
-
-	// Load all articles with their metadata for context
-	rows, err := s.db.Query(`SELECT a.id, a.title, a.author, a.subtitle, am.themes, am.context
-		FROM articles a LEFT JOIN article_meta am ON am.article_id = a.id
-		ORDER BY a.id`)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var catalog strings.Builder
-	for rows.Next() {
-		var id int64
-		var title, author, subtitle string
-		var themes, ctx sql.NullString
-		rows.Scan(&id, &title, &author, &subtitle, &themes, &ctx)
-		context := ctx.String
-		if context == "" {
-			context = subtitle
-		}
-		fmt.Fprintf(&catalog, "ID:%d | %s (by %s) | themes: %s | %s\n",
-			id, title, author, themes.String, context)
-	}
-
-	prompt := fmt.Sprintf("User's collection:\n%s\n\nUser asks: %s", catalog.String(), body.Query)
-
-	result, err := callAnthropicRaw(cfg,
-		`You are a thoughtful librarian for someone's personal article collection. They're asking about a topic — find the most relevant articles and write a short, engaging response.
-
-Your response MUST be valid JSON with this structure:
-{"writeup": "2-3 paragraphs exploring the user's question, weaving in references to specific articles by title. Teach them something from the articles, don't just list them. Make the writeup itself valuable to read.", "main_pick": <article_id>, "supporting": [<article_id>, ...], "reasoning": "one sentence on why you chose these"}
-
-The writeup should feel like a knowledgeable friend saying "oh, you're interested in that? Here's what your own collection has to say about it." Reference articles naturally, by title and author, as part of the narrative.`,
-		prompt, 2000)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	var response map[string]any
-	if err := parseJSONFromResponse(result, &response); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"writeup": result, "main_pick": nil, "supporting": nil})
-		return
-	}
-
-	// Enrich with article details so the frontend doesn't need N+1 fetches.
-	articles := map[string]any{}
-	allPicks := []float64{}
-	if mp, ok := response["main_pick"].(float64); ok && mp > 0 {
-		allPicks = append(allPicks, mp)
-	}
-	if sup, ok := response["supporting"].([]any); ok {
-		for _, v := range sup {
-			if id, ok := v.(float64); ok && id > 0 {
-				allPicks = append(allPicks, id)
-			}
-		}
-	}
-	for _, fid := range allPicks {
-		id := int64(fid)
-		a, err := getArticle(s.db, id)
-		if err != nil {
-			continue
-		}
-		articles[fmt.Sprintf("%d", id)] = map[string]any{
-			"id":              a.ID,
-			"title":           a.Title,
-			"author":          a.Author,
-			"cover_image_url": a.CoverImage,
-			"word_count":      a.WordCount,
-			"pitch_line":      a.PitchLine,
-			"subtitle":        a.Subtitle,
-		}
-	}
-	response["articles"] = articles
-
-	writeJSON(w, http.StatusOK, response)
-}
+// handleAsk is now replaced by handleAskWithIssues in issues.go.

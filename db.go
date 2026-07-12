@@ -109,6 +109,18 @@ CREATE TABLE IF NOT EXISTS article_meta (
 	difficulty  TEXT,
 	analyzed_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS issues (
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	title          TEXT NOT NULL,
+	query          TEXT NOT NULL,
+	query_norm     TEXT NOT NULL,
+	writeup        TEXT NOT NULL,
+	main_pick      INTEGER REFERENCES articles(id),
+	supporting     TEXT,
+	article_count  INTEGER DEFAULT 0,
+	created_at     TEXT NOT NULL
+);
 `
 
 // Article is the stored representation of one saved Substack post.
