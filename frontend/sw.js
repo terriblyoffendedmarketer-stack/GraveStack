@@ -1,5 +1,5 @@
 // GraveStack service worker: push delivery + minimal shell cache.
-const CACHE = 'gravestack-v1';
+const CACHE = 'gravestack-v2';
 const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -13,19 +13,18 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Network-first for API, cache-first for the shell. Never cache API responses
-// (today's pick must be live).
+// Network-first for everything: always try fresh, cache as fallback for offline.
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/internal/')) return;
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
+    fetch(e.request).then((res) => {
       if (e.request.method === 'GET' && res.ok && url.origin === location.origin) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
       }
       return res;
-    }).catch(() => caches.match('/')))
+    }).catch(() => caches.match(e.request).then((hit) => hit || caches.match('/')))
   );
 });
 
