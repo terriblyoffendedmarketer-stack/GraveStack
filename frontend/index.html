@@ -26,7 +26,11 @@
 <main id="home" class="screen hidden">
   <header class="home-header">
     <h1 class="home-logo">GraveStack</h1>
-    <button id="gear" class="gear" aria-label="Settings">&#9881;</button>
+    <div class="header-actions">
+      <button class="header-icon" onclick="openHistory()" aria-label="History" title="History">&#128337;</button>
+      <button class="header-icon" onclick="openTaste()" aria-label="Your Taste" title="Your Taste">&#9733;</button>
+      <button id="gear" class="gear" aria-label="Settings">&#9881;</button>
+    </div>
   </header>
 
   <!-- Featured article (big tile) -->
@@ -78,8 +82,6 @@
   <!-- Magazine link -->
   <section class="magazine-link-section">
     <button class="magazine-link" onclick="openMagazine()">Browse the magazine &#8594;</button>
-    <button class="magazine-link taste-link" onclick="openTaste()">Your taste &#8594;</button>
-    <button class="magazine-link taste-link" onclick="openHistory()">Reading history &#8594;</button>
   </section>
 
   <!-- Empty state -->
@@ -94,7 +96,10 @@
 
 <!-- Reader (drill-down from home) -->
 <div id="reader" class="screen hidden">
-  <button class="reader-back" onclick="backToHome()">&#8592; Back</button>
+  <div class="reader-toolbar">
+    <button class="reader-back" onclick="backToHome()">&#8592; Back</button>
+    <button class="share-btn" onclick="shareArticle()" title="Copy link">&#x1F517;</button>
+  </div>
   <article id="article">
     <div id="cover" class="cover"></div>
     <div class="pitch">

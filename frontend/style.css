@@ -32,6 +32,10 @@ body { overscroll-behavior-y: none; }
   padding: 16px 20px 8px; max-width: var(--max-w); margin: 0 auto; }
 .home-logo { font-family: var(--serif); font-size: 1.3rem; margin: 0; font-weight: 400;
   color: var(--muted); letter-spacing: .01em; }
+.header-actions { display: flex; align-items: center; gap: 4px; }
+.header-icon { width: 36px; height: 36px; border-radius: 50%; border: none; background: transparent;
+  color: var(--muted); font-size: 1rem; cursor: pointer; padding: 0; }
+.header-icon:hover { color: var(--fg); }
 .gear { width: 36px; height: 36px; border-radius: 50%; border: none; background: transparent;
   color: var(--muted); font-size: 1.1rem; cursor: pointer; }
 .gear:hover { color: var(--fg); }
@@ -136,9 +140,13 @@ body { overscroll-behavior-y: none; }
 
 /* ---------- Reader ---------- */
 #reader { position: relative; }
-.reader-back { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 14px; z-index: 20;
-  padding: 6px 14px; border-radius: 20px; border: none; background: rgba(0,0,0,.5);
+.reader-toolbar { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 14px; right: 14px;
+  z-index: 20; display: flex; justify-content: space-between; pointer-events: none; }
+.reader-toolbar > * { pointer-events: auto; }
+.reader-back { padding: 6px 14px; border-radius: 20px; border: none; background: rgba(0,0,0,.5);
   color: #fff; font-size: .9rem; backdrop-filter: blur(6px); cursor: pointer; }
+.share-btn { padding: 6px 12px; border-radius: 20px; border: none; background: rgba(0,0,0,.5);
+  color: #fff; font-size: .85rem; backdrop-filter: blur(6px); cursor: pointer; }
 
 .cover { width: 100%; aspect-ratio: 16/10; background-size: cover; background-position: center;
   background-color: #202024; }

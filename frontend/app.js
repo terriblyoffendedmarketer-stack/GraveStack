@@ -285,6 +285,19 @@ async function loadRelated(id) {
   } catch (e) {}
 }
 
+async function shareArticle() {
+  if (!current || !current.url) return;
+  if (navigator.share) {
+    try { await navigator.share({ title: current.title, url: current.url }); } catch (e) {}
+  } else {
+    await navigator.clipboard.writeText(current.url);
+    const btn = document.querySelector('.share-btn');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  }
+}
+
 function backToHome() {
   localStorage.removeItem('gs_reading');
   loadHome();
