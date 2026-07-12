@@ -79,6 +79,7 @@
   <section class="magazine-link-section">
     <button class="magazine-link" onclick="openMagazine()">Browse the magazine &#8594;</button>
     <button class="magazine-link taste-link" onclick="openTaste()">Your taste &#8594;</button>
+    <button class="magazine-link taste-link" onclick="openHistory()">Reading history &#8594;</button>
   </section>
 
   <!-- Empty state -->
@@ -111,6 +112,10 @@
       <div class="feedback-buttons">
         <button class="feedback-btn feedback-loved" onclick="sendFeedback('loved')">Loved it</button>
         <button class="feedback-btn feedback-meh" onclick="sendFeedback('meh')">Meh</button>
+      </div>
+      <div class="note-section">
+        <textarea id="article-note" class="article-note" placeholder="Any thoughts? (optional)" rows="3"></textarea>
+        <button class="feedback-btn note-save" onclick="saveArticleNote()">Save note</button>
       </div>
     </div>
   </article>
@@ -154,6 +159,17 @@
   </div>
   <div id="taste-content" class="taste-content">
     <div class="loading">Loading your profile...</div>
+  </div>
+</div>
+
+<!-- Reading history -->
+<div id="history" class="screen hidden">
+  <div class="taste-header">
+    <button class="reader-back" onclick="backToHome()" style="position:static;background:transparent;backdrop-filter:none;color:var(--muted);padding:0">&#8592; Back</button>
+    <h2 class="taste-title">Reading History</h2>
+  </div>
+  <div id="history-content" class="taste-content">
+    <div class="loading">Loading...</div>
   </div>
 </div>
 

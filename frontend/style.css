@@ -41,7 +41,7 @@ body { overscroll-behavior-y: none; }
   border-radius: 16px; overflow: hidden; background: var(--card);
   transition: background .15s; }
 .featured:hover, .featured:focus-visible { background: var(--card-hover); outline: none; }
-.featured-cover { width: 100%; aspect-ratio: 16/9; background-size: cover;
+.featured-cover { width: 100%; aspect-ratio: 3/2; background-size: cover;
   background-position: center; background-color: #202024; }
 .featured-cover.generated { background-size: 100% 100%; }
 .featured-body { padding: 20px 22px 24px; }
@@ -347,6 +347,29 @@ summary { color: var(--accent); cursor: pointer; font-size: .9rem; }
 .feedback-loved:active { background: var(--accent); color: #fff; }
 .feedback-meh:active { background: var(--line); }
 .feedback-thanks { color: var(--muted); font-size: .9rem; }
+
+/* Notes */
+.note-section { margin-top: 16px; }
+.article-note { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--card); color: var(--fg); font-family: var(--sans); font-size: .9rem;
+  resize: vertical; min-height: 60px; }
+.article-note::placeholder { color: var(--muted); }
+.note-save { margin-top: 8px; }
+.notes-section { padding: 0 20px 24px; }
+.note-item { border-left: 3px solid var(--muted); padding: 8px 12px; margin-bottom: 10px;
+  background: rgba(255,255,255,.03); border-radius: 0 6px 6px 0; }
+.note-text { margin: 0; font-size: .9rem; color: var(--fg); line-height: 1.5; }
+
+/* History */
+.history-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
+  cursor: pointer; align-items: center; }
+.history-item:active { background: rgba(255,255,255,.03); }
+.history-cover { width: 56px; height: 56px; border-radius: 8px; background-size: cover;
+  background-position: center; flex-shrink: 0; }
+.history-info { flex: 1; min-width: 0; }
+.history-title { font-size: .9rem; font-weight: 500; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.history-meta { font-size: .8rem; color: var(--muted); margin-top: 2px; }
 
 /* Highlights */
 .highlight-tooltip { position: absolute; z-index: 100; background: var(--accent);

@@ -93,6 +93,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/issue/{id}", s.auth.require(s.handleDeleteIssue))
 	mux.HandleFunc("POST /api/issue/{id}/merge/{other}", s.auth.require(s.handleMergeIssues))
 	mux.HandleFunc("GET /api/taste", s.auth.require(s.handleTaste))
+	mux.HandleFunc("GET /api/article/{id}/notes", s.auth.require(s.handleListNotes))
+	mux.HandleFunc("POST /api/article/{id}/notes", s.auth.require(s.handleSaveNote))
+	mux.HandleFunc("GET /api/history", s.auth.require(s.handleHistory))
 
 	// External cron trigger (token-protected, no session needed)
 	mux.HandleFunc("POST /internal/cron/daily", s.handleCron)
@@ -682,6 +685,83 @@ func (s *server) handleDeleteHighlight(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	s.db.Exec(`DELETE FROM highlights WHERE id = ?`, id)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *server) handleListNotes(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	rows, err := s.db.Query(`SELECT id, text, created_at FROM notes WHERE article_id = ? ORDER BY id DESC`, id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	defer rows.Close()
+	type note struct {
+		ID        int64  `json:"id"`
+		Text      string `json:"text"`
+		CreatedAt string `json:"created_at"`
+	}
+	var notes []note
+	for rows.Next() {
+		var n note
+		rows.Scan(&n.ID, &n.Text, &n.CreatedAt)
+		notes = append(notes, n)
+	}
+	if notes == nil {
+		notes = []note{}
+	}
+	writeJSON(w, http.StatusOK, notes)
+}
+
+func (s *server) handleSaveNote(w http.ResponseWriter, r *http.Request) {
+	articleID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Text == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	res, err := s.db.Exec(`INSERT INTO notes(article_id, text, created_at) VALUES(?,?,?)`,
+		articleID, body.Text, nowUTC())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id, _ := res.LastInsertId()
+	writeJSON(w, http.StatusOK, map[string]int64{"id": id})
+}
+
+func (s *server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT a.id, a.title, a.author, a.cover_image_url, e.created_at
+		FROM events e
+		JOIN articles a ON a.id = e.article_id
+		WHERE e.type IN ('read_started', 'completed')
+		GROUP BY a.id
+		ORDER BY MAX(e.created_at) DESC
+		LIMIT 50`)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	defer rows.Close()
+	type historyItem struct {
+		ID       int64  `json:"id"`
+		Title    string `json:"title"`
+		Author   string `json:"author"`
+		CoverURL string `json:"cover_image_url"`
+		LastRead string `json:"last_read"`
+	}
+	var items []historyItem
+	for rows.Next() {
+		var h historyItem
+		rows.Scan(&h.ID, &h.Title, &h.Author, &h.CoverURL, &h.LastRead)
+		items = append(items, h)
+	}
+	if items == nil {
+		items = []historyItem{}
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 // handleAsk is now replaced by handleAskWithIssues in issues.go.

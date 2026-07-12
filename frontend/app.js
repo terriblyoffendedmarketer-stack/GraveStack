@@ -27,7 +27,13 @@ async function boot() {
   const res = await fetch('/api/session');
   const s = await res.json();
   if (s.needsLogin && !s.authed) { showLogin(); return; }
-  loadHome();
+  // Resume reading if an article was open when the app was last closed.
+  const lastArticle = localStorage.getItem('gs_reading');
+  if (lastArticle) {
+    openArticle(parseInt(lastArticle, 10));
+  } else {
+    loadHome();
+  }
 }
 
 function showLogin() {
@@ -35,7 +41,7 @@ function showLogin() {
 }
 
 function hideAll() {
-  for (const id of ['login', 'home', 'reader', 'thread-view', 'magazine', 'issue-view', 'taste', 'settings']) hide($(id));
+  for (const id of ['login', 'home', 'reader', 'thread-view', 'magazine', 'issue-view', 'taste', 'history', 'settings']) hide($(id));
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -53,8 +59,24 @@ async function loadHome() {
   hideAll(); show($('home'));
   hide($('empty'));
 
-  const res = await api('/api/home');
-  const data = await res.json();
+  const today = new Date().toISOString().slice(0, 10);
+  const cacheKey = 'gs_home_' + today;
+
+  // Use today's cached picks so the home page stays stable within a day.
+  let data;
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) {
+    data = JSON.parse(cached);
+  } else {
+    // Clear stale day caches.
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('gs_home_') && k !== cacheKey) localStorage.removeItem(k);
+    }
+    const res = await api('/api/home');
+    data = await res.json();
+    if (!data.empty) localStorage.setItem(cacheKey, JSON.stringify(data));
+  }
   if (data.empty) { show($('empty')); return; }
 
   renderFeatured(data.featured);
@@ -199,11 +221,13 @@ async function openArticle(id) {
   hide($('post-read-feedback'));
   window.scrollTo(0, 0);
 
+  localStorage.setItem('gs_reading', id);
   const res = await api('/api/article/' + id);
   const data = await res.json();
   renderArticle(data.article);
   loadRelated(id);
   loadHighlights(id);
+  loadNotes(id);
 }
 
 function renderArticle(a) {
@@ -262,6 +286,7 @@ async function loadRelated(id) {
 }
 
 function backToHome() {
+  localStorage.removeItem('gs_reading');
   loadHome();
 }
 
@@ -467,6 +492,7 @@ window.addEventListener('scroll', throttle(() => {
   if (!completedFired && pct >= 90) {
     completedFired = true;
     sendEvent('completed', pct);
+    localStorage.removeItem('gs_reading');
     show($('post-read-feedback'));
   }
 }, 800));
@@ -480,8 +506,48 @@ function sendEvent(type, pct) {
 
 function sendFeedback(type) {
   sendEvent(type, maxScroll);
-  const fb = $('post-read-feedback');
-  fb.innerHTML = '<p class="feedback-thanks">Got it — noted!</p>';
+  const btns = document.querySelector('.feedback-buttons');
+  if (btns) btns.innerHTML = '<p class="feedback-thanks">Got it — noted!</p>';
+}
+
+async function saveArticleNote() {
+  if (!current) return;
+  const textarea = $('article-note');
+  const text = textarea.value.trim();
+  if (!text) return;
+  try {
+    await api('/api/article/' + current.id + '/notes', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+    textarea.value = '';
+    loadNotes(current.id);
+  } catch (e) {}
+}
+
+async function loadNotes(articleId) {
+  try {
+    const res = await api('/api/article/' + articleId + '/notes');
+    const notes = await res.json();
+    renderNotes(notes);
+  } catch (e) {}
+}
+
+function renderNotes(notes) {
+  let section = document.getElementById('notes-section');
+  if (!section) {
+    section = document.createElement('section');
+    section.id = 'notes-section';
+    section.className = 'notes-section';
+    const feedback = $('post-read-feedback');
+    feedback.parentNode.insertBefore(section, feedback.nextSibling);
+  }
+  if (!notes.length) { section.innerHTML = ''; return; }
+  let html = '<h3 class="section-label">Your notes</h3>';
+  for (const n of notes) {
+    html += `<div class="note-item"><p class="note-text">${escapeHTML(n.text)}</p></div>`;
+  }
+  section.innerHTML = html;
 }
 
 window.addEventListener('visibilitychange', () => {
@@ -652,9 +718,9 @@ function renderTaste(el, d) {
   html += tasteNum(n.completed, 'Completed');
   html += tasteNum(n.loved, 'Loved');
   html += tasteNum(n.highlights, 'Highlights');
+  html += tasteNum(n.notes, 'Notes');
   html += tasteNum(n.queries_made, 'Queries');
   html += tasteNum(n.avg_scroll_depth + '%', 'Avg depth');
-  html += tasteNum(n.this_week, 'This week');
   html += tasteNum(n.this_month, 'This month');
   html += '</div>';
 
@@ -749,6 +815,42 @@ function tasteBar(label, count, total) {
     <div class="taste-bar-track"><div class="taste-bar-fill" style="width:${pct}%"></div></div>
     <span class="taste-bar-val">${count}</span>
   </div>`;
+}
+
+// ---------- reading history ----------
+async function openHistory() {
+  hideAll(); show($('history'));
+  window.scrollTo(0, 0);
+
+  const content = $('history-content');
+  content.innerHTML = '<div class="loading">Loading...</div>';
+
+  try {
+    const res = await api('/api/history');
+    const items = await res.json();
+    if (!items.length) {
+      content.innerHTML = '<p class="empty-msg">No reading history yet.</p>';
+      return;
+    }
+    let html = '';
+    for (const h of items) {
+      const date = h.last_read ? new Date(h.last_read).toLocaleDateString() : '';
+      let coverHTML = '';
+      if (h.cover_image_url) {
+        coverHTML = `<div class="history-cover" style="background-image:url('${escapeAttr(h.cover_image_url)}')"></div>`;
+      }
+      html += `<div class="history-item" onclick="openArticle(${h.id})">
+        ${coverHTML}
+        <div class="history-info">
+          <div class="history-title">${escapeHTML(h.title)}</div>
+          <div class="history-meta">${escapeHTML(h.author || '')}${date ? ' · ' + date : ''}</div>
+        </div>
+      </div>`;
+    }
+    content.innerHTML = html;
+  } catch (e) {
+    content.innerHTML = '<p class="empty-msg">Could not load history.</p>';
+  }
 }
 
 async function openMagazine(threadSlug) {

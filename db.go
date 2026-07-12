@@ -118,6 +118,13 @@ CREATE TABLE IF NOT EXISTS highlights (
 	created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS notes (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	article_id INTEGER REFERENCES articles(id) ON DELETE CASCADE,
+	text       TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS issues (
 	id             INTEGER PRIMARY KEY AUTOINCREMENT,
 	title          TEXT NOT NULL,

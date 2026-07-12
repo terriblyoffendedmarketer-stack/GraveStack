@@ -19,6 +19,7 @@ type tasteNumbers struct {
 	TotalArticles  int     `json:"total_articles"`
 	Completed      int     `json:"completed"`
 	Highlights     int     `json:"highlights"`
+	Notes          int     `json:"notes"`
 	QueriesMade    int     `json:"queries_made"`
 	AvgScrollDepth int     `json:"avg_scroll_depth"`
 	ThisWeek       int     `json:"this_week"`
@@ -70,6 +71,8 @@ func buildTaste(db *sql.DB) (*tasteResponse, error) {
 	db.QueryRow(`SELECT COUNT(*) FROM highlights`).Scan(&t.Numbers.Highlights)
 	db.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&t.Numbers.QueriesMade)
 	db.QueryRow(`SELECT COUNT(DISTINCT article_id) FROM events WHERE type = 'loved'`).Scan(&t.Numbers.Loved)
+
+	db.QueryRow(`SELECT COUNT(*) FROM notes`).Scan(&t.Numbers.Notes)
 
 	db.QueryRow(`SELECT COALESCE(AVG(scroll_pct), 0) FROM events
 		WHERE type IN ('completed', 'abandoned', 'scrolled')`).Scan(&t.Numbers.AvgScrollDepth)
