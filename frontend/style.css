@@ -335,3 +335,29 @@ summary { color: var(--accent); cursor: pointer; font-size: .9rem; }
   border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
   animation: spin .8s linear infinite; margin-left: 8px; vertical-align: middle; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Post-read feedback */
+.post-read-feedback { text-align: center; padding: 24px 20px; margin-top: 16px; }
+.feedback-prompt { color: var(--muted); font-size: .9rem; margin-bottom: 12px; }
+.feedback-buttons { display: flex; gap: 12px; justify-content: center; }
+.feedback-btn { padding: 10px 24px; border-radius: 20px; border: 1px solid var(--line);
+  background: transparent; color: var(--fg); font-size: .9rem; cursor: pointer;
+  transition: all .2s; }
+.feedback-btn:hover { border-color: var(--accent); }
+.feedback-loved:active { background: var(--accent); color: #fff; }
+.feedback-meh:active { background: var(--line); }
+.feedback-thanks { color: var(--muted); font-size: .9rem; }
+
+/* Highlights */
+.highlight-tooltip { position: absolute; z-index: 100; background: var(--accent);
+  border-radius: 6px; padding: 0; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+.highlight-tooltip button { background: none; border: none; color: #fff; font-size: .8rem;
+  padding: 6px 14px; cursor: pointer; white-space: nowrap; }
+.highlights-section { padding: 0 20px 24px; }
+.highlight-item { border-left: 3px solid var(--accent); padding: 8px 12px; margin-bottom: 12px;
+  background: rgba(255,255,255,.03); border-radius: 0 6px 6px 0; position: relative; }
+.highlight-text { margin: 0; font-style: italic; font-size: .9rem; color: var(--fg); }
+.highlight-note { margin: 6px 0 0; font-size: .8rem; color: var(--muted); }
+.highlight-delete { position: absolute; top: 6px; right: 8px; background: none; border: none;
+  color: var(--muted); font-size: .75rem; cursor: pointer; opacity: .5; }
+.highlight-delete:hover { opacity: 1; color: var(--accent); }

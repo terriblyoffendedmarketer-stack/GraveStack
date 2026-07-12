@@ -16,6 +16,7 @@ func startScheduler(db *sql.DB, cfg Config) {
 		defer t.Stop()
 		for range t.C {
 			maybeFireDaily(db, cfg)
+			maybeAutoSync(db, cfg)
 		}
 	}()
 }
@@ -45,6 +46,39 @@ func maybeFireDaily(db *sql.DB, cfg Config) {
 		return
 	}
 	fireDaily(db, cfg, today)
+}
+
+const autoSyncInterval = 8 * time.Hour
+
+func maybeAutoSync(db *sql.DB, cfg Config) {
+	cookie := getSetting(db, "cookie")
+	if cookie == "" {
+		return
+	}
+	lastSync := getSetting(db, "last_auto_sync")
+	if lastSync != "" {
+		t, err := time.Parse(time.RFC3339, lastSync)
+		if err == nil && time.Since(t) < autoSyncInterval {
+			return
+		}
+	}
+	endpoint := getSetting(db, "saved_list_url")
+	res, _, err := runSync(db, cfg, cookie, "", endpoint)
+	if err != nil {
+		log.Printf("auto-sync: %v", err)
+		return
+	}
+	_ = setSetting(db, "last_auto_sync", time.Now().UTC().Format(time.RFC3339))
+	log.Printf("auto-sync: %d new, %d skipped", res.New, res.Skipped)
+
+	// If new articles arrived and we have an API key, run incremental graph build
+	// to analyze them, place in threads, and check for thread emergence.
+	if res.New > 0 && cfg.AnthropicKey != "" {
+		log.Printf("auto-sync: running incremental graph build for %d new articles", res.New)
+		if err := buildGraph(db, cfg); err != nil {
+			log.Printf("auto-sync: graph build failed: %v", err)
+		}
+	}
 }
 
 func fireDaily(db *sql.DB, cfg Config, today string) {

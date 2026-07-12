@@ -110,6 +110,14 @@ CREATE TABLE IF NOT EXISTS article_meta (
 	analyzed_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS highlights (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	article_id INTEGER REFERENCES articles(id) ON DELETE CASCADE,
+	text       TEXT NOT NULL,
+	note       TEXT DEFAULT '',
+	created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS issues (
 	id             INTEGER PRIMARY KEY AUTOINCREMENT,
 	title          TEXT NOT NULL,

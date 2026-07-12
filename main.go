@@ -59,6 +59,7 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	// Home + reading loop (all gated)
 	mux.HandleFunc("GET /api/home", s.auth.require(s.handleHome))
+	mux.HandleFunc("POST /api/home/enrich", s.auth.require(s.handleHomeEnrich))
 	mux.HandleFunc("GET /api/today", s.auth.require(s.handleToday))
 	mux.HandleFunc("POST /api/reroll", s.auth.require(s.handleReroll))
 	mux.HandleFunc("POST /api/not-today", s.auth.require(s.handleNotToday))
@@ -82,6 +83,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/threads", s.auth.require(s.handleThreads))
 	mux.HandleFunc("GET /api/thread/{slug}", s.auth.require(s.handleThread))
 	mux.HandleFunc("GET /api/article/{id}/related", s.auth.require(s.handleRelated))
+	mux.HandleFunc("GET /api/article/{id}/highlights", s.auth.require(s.handleListHighlights))
+	mux.HandleFunc("POST /api/article/{id}/highlights", s.auth.require(s.handleSaveHighlight))
+	mux.HandleFunc("DELETE /api/highlight/{id}", s.auth.require(s.handleDeleteHighlight))
 	mux.HandleFunc("POST /api/ask", s.auth.require(s.handleAskWithIssues))
 	mux.HandleFunc("GET /api/magazine", s.auth.require(s.handleMagazine))
 	mux.HandleFunc("GET /api/issues", s.auth.require(s.handleListIssues))
@@ -161,6 +165,58 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, home)
+}
+
+func (s *server) handleHomeEnrich(w http.ResponseWriter, r *http.Request) {
+	cfg := s.cfgForRequest(r)
+	if cfg.AnthropicKey == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"pitches": map[string]any{}, "writeup": ""})
+		return
+	}
+
+	var req struct {
+		ArticleIDs []int64 `json:"article_ids"`
+		Writeup    bool    `json:"writeup"`
+		Featured   int64   `json:"featured"`
+		Suggestion []int64 `json:"suggestions"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	pitches := map[int64]map[string]string{}
+	for _, id := range req.ArticleIDs {
+		a, err := getArticle(s.db, id)
+		if err != nil {
+			continue
+		}
+		ensurePitch(s.db, cfg, a)
+		pitches[id] = map[string]string{
+			"pitch_line": a.PitchLine,
+			"pull_quote": a.PullQuote,
+		}
+	}
+
+	var writeup string
+	if req.Writeup && req.Featured > 0 {
+		fa, _ := getArticle(s.db, req.Featured)
+		if fa != nil {
+			featured := &homeArticle{Article: fa}
+			var suggestions []*homeArticle
+			for _, sid := range req.Suggestion {
+				sa, _ := getArticle(s.db, sid)
+				if sa != nil {
+					suggestions = append(suggestions, &homeArticle{Article: sa})
+				}
+			}
+			if len(suggestions) > 0 {
+				writeup = generateWriteup(cfg, featured, suggestions)
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"pitches": pitches, "writeup": writeup})
 }
 
 // ---- reading loop ----
@@ -573,6 +629,58 @@ func (s *server) handleRelated(w http.ResponseWriter, r *http.Request) {
 		results = append(results, related{Article: a, Relation: r.rel, Strength: r.strength, Reason: r.reason})
 	}
 	writeJSON(w, http.StatusOK, results)
+}
+
+func (s *server) handleListHighlights(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	rows, err := s.db.Query(`SELECT id, text, note, created_at FROM highlights WHERE article_id = ? ORDER BY id`, id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	defer rows.Close()
+	type highlight struct {
+		ID        int64  `json:"id"`
+		Text      string `json:"text"`
+		Note      string `json:"note"`
+		CreatedAt string `json:"created_at"`
+	}
+	var hl []highlight
+	for rows.Next() {
+		var h highlight
+		rows.Scan(&h.ID, &h.Text, &h.Note, &h.CreatedAt)
+		hl = append(hl, h)
+	}
+	if hl == nil {
+		hl = []highlight{}
+	}
+	writeJSON(w, http.StatusOK, hl)
+}
+
+func (s *server) handleSaveHighlight(w http.ResponseWriter, r *http.Request) {
+	articleID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	var body struct {
+		Text string `json:"text"`
+		Note string `json:"note"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Text == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	res, err := s.db.Exec(`INSERT INTO highlights(article_id, text, note, created_at) VALUES(?,?,?,?)`,
+		articleID, body.Text, body.Note, nowUTC())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	id, _ := res.LastInsertId()
+	writeJSON(w, http.StatusOK, map[string]int64{"id": id})
+}
+
+func (s *server) handleDeleteHighlight(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	s.db.Exec(`DELETE FROM highlights WHERE id = ?`, id)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // handleAsk is now replaced by handleAskWithIssues in issues.go.

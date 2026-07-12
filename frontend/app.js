@@ -62,6 +62,52 @@ async function loadHome() {
   renderWriteup(data.writeup);
   renderThreadsNav(data.threads || []);
   loadIssues();
+
+  // Async enrich: generate pitches + writeup in background without blocking render.
+  if ((data.pending_pitches && data.pending_pitches.length) || data.pending_writeup) {
+    enrichHome(data);
+  }
+}
+
+async function enrichHome(data) {
+  const featuredId = data.featured && data.featured.article ? data.featured.article.id : 0;
+  const suggestionIds = (data.suggestions || []).map(s => s.article.id);
+  const body = {
+    article_ids: data.pending_pitches || [],
+    writeup: data.pending_writeup || false,
+    featured: featuredId,
+    suggestions: suggestionIds,
+  };
+  try {
+    const res = await api('/api/home/enrich', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const enriched = await res.json();
+
+    // Update pitches in the rendered cards.
+    if (enriched.pitches) {
+      if (enriched.pitches[featuredId]) {
+        const pitch = enriched.pitches[featuredId].pitch_line;
+        if (pitch) $('featured-context').textContent = pitch;
+      }
+      const cards = document.querySelectorAll('.suggestion-card');
+      (data.suggestions || []).forEach((s, i) => {
+        const p = enriched.pitches[s.article.id];
+        if (p && p.pitch_line && cards[i]) {
+          const ctx = cards[i].querySelector('.suggestion-card-reason');
+          if (ctx) ctx.textContent = p.pitch_line;
+        }
+      });
+    }
+
+    if (enriched.writeup) {
+      renderWriteup(enriched.writeup);
+    }
+  } catch (e) {
+    // Enrichment is best-effort — page already rendered with fallbacks.
+  }
 }
 
 function renderFeatured(f) {
@@ -150,12 +196,14 @@ function renderThreadsNav(threads) {
 async function openArticle(id) {
   hideAll(); show($('reader'));
   hide($('related'));
+  hide($('post-read-feedback'));
   window.scrollTo(0, 0);
 
   const res = await api('/api/article/' + id);
   const data = await res.json();
   renderArticle(data.article);
   loadRelated(id);
+  loadHighlights(id);
 }
 
 function renderArticle(a) {
@@ -216,6 +264,78 @@ async function loadRelated(id) {
 function backToHome() {
   loadHome();
 }
+
+// ---------- highlights ----------
+async function loadHighlights(articleId) {
+  const section = $('highlights-section');
+  hide(section);
+  try {
+    const res = await api('/api/article/' + articleId + '/highlights');
+    const highlights = await res.json();
+    if (!highlights.length) return;
+    show(section);
+    renderHighlights(highlights, articleId);
+  } catch (e) {}
+}
+
+function renderHighlights(highlights, articleId) {
+  const list = $('highlights-list');
+  list.innerHTML = '';
+  for (const h of highlights) {
+    const el = document.createElement('div');
+    el.className = 'highlight-item';
+    el.innerHTML = `<blockquote class="highlight-text">${escapeHTML(h.text)}</blockquote>
+      ${h.note ? `<p class="highlight-note">${escapeHTML(h.note)}</p>` : ''}
+      <button class="highlight-delete" onclick="deleteHighlight(${h.id}, ${articleId})">Remove</button>`;
+    list.appendChild(el);
+  }
+}
+
+async function saveHighlight() {
+  const sel = window.getSelection();
+  const text = sel.toString().trim();
+  if (!text || !current) return;
+  hide($('highlight-tooltip'));
+  sel.removeAllRanges();
+  try {
+    await api('/api/article/' + current.id + '/highlights', {
+      method: 'POST',
+      body: JSON.stringify({ text, note: '' }),
+    });
+    loadHighlights(current.id);
+  } catch (e) {}
+}
+
+async function deleteHighlight(id, articleId) {
+  try {
+    await api('/api/highlight/' + id, { method: 'DELETE' });
+    loadHighlights(articleId);
+  } catch (e) {}
+}
+
+// Show tooltip on text selection within the article body.
+document.addEventListener('mouseup', positionHighlightTooltip);
+document.addEventListener('touchend', () => setTimeout(positionHighlightTooltip, 100));
+
+function positionHighlightTooltip() {
+  const tooltip = $('highlight-tooltip');
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed || !current || $('reader').classList.contains('hidden')) {
+    hide(tooltip);
+    return;
+  }
+  const bodyEl = $('body');
+  if (!bodyEl.contains(sel.anchorNode)) { hide(tooltip); return; }
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  tooltip.style.top = (rect.top + window.scrollY - 40) + 'px';
+  tooltip.style.left = Math.min(rect.left + rect.width / 2 - 60, window.innerWidth - 140) + 'px';
+  show(tooltip);
+}
+
+document.addEventListener('mousedown', (e) => {
+  const tooltip = $('highlight-tooltip');
+  if (!tooltip.contains(e.target)) hide(tooltip);
+});
 
 // ---------- thread view ----------
 async function openThread(slug) {
@@ -344,7 +464,11 @@ window.addEventListener('scroll', throttle(() => {
   const pct = Math.min(100, Math.round(((h.scrollTop + window.innerHeight) / h.scrollHeight) * 100));
   if (pct > maxScroll) maxScroll = pct;
   if (!readStarted && pct > 15) { readStarted = true; sendEvent('read_started', pct); }
-  if (!completedFired && pct >= 90) { completedFired = true; sendEvent('completed', pct); }
+  if (!completedFired && pct >= 90) {
+    completedFired = true;
+    sendEvent('completed', pct);
+    show($('post-read-feedback'));
+  }
 }, 800));
 
 function sendEvent(type, pct) {
@@ -352,6 +476,12 @@ function sendEvent(type, pct) {
   api('/api/events', { method: 'POST', body: JSON.stringify({
     article_id: current.id, type, scroll_pct: pct || 0
   })}).catch(() => {});
+}
+
+function sendFeedback(type) {
+  sendEvent(type, maxScroll);
+  const fb = $('post-read-feedback');
+  fb.innerHTML = '<p class="feedback-thanks">Got it — noted!</p>';
 }
 
 window.addEventListener('visibilitychange', () => {
@@ -728,7 +858,37 @@ function generatedCover(text) {
   const sat = 25 + (abs % 30);
   const light = 12 + (abs % 10);
   const angle = abs % 360;
-  return `linear-gradient(${angle}deg, hsl(${hue1},${sat}%,${light}%) 0%, hsl(${hue2},${sat + 10}%,${light + 5}%) 50%, hsl(${hue3},${sat}%,${light + 3}%) 100%)`;
+  const grad = `linear-gradient(${angle}deg, hsl(${hue1},${sat}%,${light}%) 0%, hsl(${hue2},${sat + 10}%,${light + 5}%) 50%, hsl(${hue3},${sat}%,${light + 3}%) 100%)`;
+
+  // Add geometric shapes via SVG for visual interest.
+  const shapes = [];
+  const shapeCount = 2 + (abs % 3);
+  for (let i = 0; i < shapeCount; i++) {
+    const seed = (abs * (i + 7)) >>> 0;
+    const x = 10 + (seed % 80);
+    const y = 10 + ((seed >> 8) % 80);
+    const size = 20 + (seed % 40);
+    const opacity = 0.06 + (seed % 8) / 100;
+    const shapeType = seed % 3;
+    if (shapeType === 0) {
+      shapes.push(`<circle cx="${x}%" cy="${y}%" r="${size}" fill="white" opacity="${opacity}"/>`);
+    } else if (shapeType === 1) {
+      shapes.push(`<rect x="${x - 5}%" y="${y - 5}%" width="${size}" height="${size}" fill="white" opacity="${opacity}" transform="rotate(${seed % 45} ${x} ${y})"/>`);
+    } else {
+      const pts = `${x},${y - size / 2} ${x - size / 2},${y + size / 2} ${x + size / 2},${y + size / 2}`;
+      shapes.push(`<polygon points="${pts}" fill="white" opacity="${opacity}"/>`);
+    }
+  }
+
+  // First letter as a large watermark.
+  const letter = (text[0] || '').toUpperCase();
+  const letterX = 50 + (abs % 30) - 15;
+  const letterY = 50 + ((abs >> 4) % 30) - 15;
+  shapes.push(`<text x="${letterX}%" y="${letterY}%" font-size="120" font-family="serif" fill="white" opacity="0.05" text-anchor="middle" dominant-baseline="central">${letter}</text>`);
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">${shapes.join('')}</svg>`;
+  const encoded = 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+  return `${encoded}, ${grad}`;
 }
 
 function urlBase64ToUint8Array(base64String) {

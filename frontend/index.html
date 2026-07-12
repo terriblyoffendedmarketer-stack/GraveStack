@@ -105,7 +105,23 @@
     <div id="foot" class="foot">
       <p class="foot-done">That's the one for today.</p>
     </div>
+    <div id="post-read-feedback" class="post-read-feedback hidden">
+      <p class="feedback-prompt">How was this?</p>
+      <div class="feedback-buttons">
+        <button class="feedback-btn feedback-loved" onclick="sendFeedback('loved')">Loved it</button>
+        <button class="feedback-btn feedback-meh" onclick="sendFeedback('meh')">Meh</button>
+      </div>
+    </div>
   </article>
+  <!-- Highlight tooltip (floats near selection) -->
+  <div id="highlight-tooltip" class="highlight-tooltip hidden">
+    <button onclick="saveHighlight()">Save highlight</button>
+  </div>
+  <!-- Saved highlights -->
+  <section id="highlights-section" class="highlights-section hidden">
+    <h3 class="section-label">Your highlights</h3>
+    <div id="highlights-list"></div>
+  </section>
   <!-- Related articles (post-read) -->
   <section id="related" class="related hidden">
     <h3 class="section-label">Related reads</h3>

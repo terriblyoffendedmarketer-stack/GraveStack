@@ -10,10 +10,12 @@ import (
 )
 
 type homeResponse struct {
-	Featured    *homeArticle   `json:"featured"`
-	Suggestions []*homeArticle `json:"suggestions"`
-	Writeup     string         `json:"writeup"`
-	Threads     []Thread       `json:"threads"`
+	Featured       *homeArticle   `json:"featured"`
+	Suggestions    []*homeArticle `json:"suggestions"`
+	Writeup        string         `json:"writeup"`
+	Threads        []Thread       `json:"threads"`
+	PendingPitches []int64        `json:"pending_pitches,omitempty"`
+	PendingWriteup bool           `json:"pending_writeup,omitempty"`
 }
 
 type homeArticle struct {
@@ -85,14 +87,33 @@ func buildHome(db *sql.DB, cfg Config) (*homeResponse, error) {
 		rows.Close()
 	}
 
-	// Pick the featured article: weighted toward recent saves, preferring
-	// articles with graph metadata.
-	featuredID := pickFeatured(eligible, infoMap)
+	// Load engagement scores from events to inform selection.
+	engScores := map[int64]float64{}
+	{
+		rows, err := db.Query(`SELECT article_id,
+			SUM(CASE type WHEN 'opened' THEN 1.0 WHEN 'read_started' THEN 2.0
+				WHEN 'completed' THEN 5.0 WHEN 'loved' THEN 8.0 WHEN 'meh' THEN -3.0
+				WHEN 'abandoned' THEN scroll_pct / 50.0
+				ELSE scroll_pct / 100.0 END) as score
+			FROM events GROUP BY article_id`)
+		if err == nil {
+			for rows.Next() {
+				var id int64
+				var score float64
+				rows.Scan(&id, &score)
+				engScores[id] = score
+			}
+			rows.Close()
+		}
+	}
+
+	// Pick the featured article: weighted by engagement + recency + metadata.
+	featuredID := pickFeatured(eligible, infoMap, engScores)
 	featured, err := getArticle(db, featuredID)
 	if err != nil {
 		return nil, err
 	}
-	ensurePitch(db, cfg, featured)
+	fallbackPitch(featured)
 
 	featuredInfo := infoMap[featuredID]
 	featuredThread := ""
@@ -122,7 +143,7 @@ func buildHome(db *sql.DB, cfg Config) (*homeResponse, error) {
 		if err != nil {
 			continue
 		}
-		ensurePitch(db, cfg, a)
+		fallbackPitch(a)
 		thread := ""
 		if len(s.ThreadIDs) > 0 {
 			thread = threadNames[s.ThreadIDs[0]]
@@ -136,10 +157,18 @@ func buildHome(db *sql.DB, cfg Config) (*homeResponse, error) {
 		})
 	}
 
-	// Generate daily write-up if we have an API key.
-	if cfg.AnthropicKey != "" && len(home.Suggestions) > 0 {
-		home.Writeup = generateWriteup(cfg, home.Featured, home.Suggestions)
+	// Track which articles still need real pitches generated.
+	var pending []int64
+	if featured.PitchLine == featured.Subtitle || featured.PitchLine == "" {
+		pending = append(pending, featured.ID)
 	}
+	for _, s := range home.Suggestions {
+		if s.Article.PitchLine == s.Article.Subtitle || s.Article.PitchLine == "" {
+			pending = append(pending, s.Article.ID)
+		}
+	}
+	home.PendingPitches = pending
+	home.PendingWriteup = cfg.AnthropicKey != "" && len(home.Suggestions) > 0
 
 	// Include threads for nav.
 	home.Threads = listThreads(db)
@@ -147,7 +176,20 @@ func buildHome(db *sql.DB, cfg Config) (*homeResponse, error) {
 	return home, nil
 }
 
-func pickFeatured(eligible []int64, infoMap map[int64]*graphArticleInfo) int64 {
+// fallbackPitch sets a pitch from cached data or subtitle — never calls the AI.
+func fallbackPitch(a *Article) {
+	if a.PitchLine != "" {
+		return
+	}
+	if a.Subtitle != "" {
+		a.PitchLine = a.Subtitle
+	}
+	if a.PullQuote == "" {
+		a.PullQuote = firstStrongSentence(a.PlainText)
+	}
+}
+
+func pickFeatured(eligible []int64, infoMap map[int64]*graphArticleInfo, engScores map[int64]float64) int64 {
 	// Prefer articles that have graph metadata (analyzed).
 	var withMeta []int64
 	for _, id := range eligible {
@@ -161,14 +203,34 @@ func pickFeatured(eligible []int64, infoMap map[int64]*graphArticleInfo) int64 {
 	}
 
 	n := len(pool)
-	weights := make([]int, n)
-	total := 0
-	for i := range pool {
-		w := n - i + 2
+	weights := make([]float64, n)
+	total := 0.0
+	for i, id := range pool {
+		// Base weight: recency (newer = higher index weight).
+		w := float64(n-i+2) * 2.0
+
+		// Engagement boost: positive signals push articles up.
+		if score, ok := engScores[id]; ok {
+			if score > 0 {
+				w += score * 1.5
+			} else {
+				// Negative signal (meh) reduces weight but never to zero.
+				w = w * 0.5
+			}
+		}
+
+		// Metadata bonus: articles with context are better candidates.
+		if _, ok := infoMap[id]; ok {
+			w += 3.0
+		}
+
+		if w < 1 {
+			w = 1
+		}
 		weights[i] = w
 		total += w
 	}
-	r := rand.Intn(total)
+	r := rand.Float64() * total
 	for i, w := range weights {
 		if r < w {
 			return pool[i]

@@ -64,7 +64,7 @@ func buildMagazine(db *sql.DB, threadFilter string) ([]magazineItem, error) {
 			LEFT JOIN (
 				SELECT article_id,
 					SUM(CASE type WHEN 'opened' THEN 1.0 WHEN 'read_started' THEN 2.0
-						WHEN 'completed' THEN 5.0
+						WHEN 'completed' THEN 5.0 WHEN 'loved' THEN 8.0 WHEN 'meh' THEN -3.0
 						WHEN 'abandoned' THEN scroll_pct / 50.0
 						ELSE scroll_pct / 100.0 END) as score
 				FROM events GROUP BY article_id
@@ -92,7 +92,7 @@ func buildMagazine(db *sql.DB, threadFilter string) ([]magazineItem, error) {
 			LEFT JOIN (
 				SELECT article_id,
 					SUM(CASE type WHEN 'opened' THEN 1.0 WHEN 'read_started' THEN 2.0
-						WHEN 'completed' THEN 5.0
+						WHEN 'completed' THEN 5.0 WHEN 'loved' THEN 8.0 WHEN 'meh' THEN -3.0
 						WHEN 'abandoned' THEN scroll_pct / 50.0
 						ELSE scroll_pct / 100.0 END) as score
 				FROM events GROUP BY article_id
