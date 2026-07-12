@@ -2,22 +2,30 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"math"
 	"net/http"
-	"sort"
 )
 
 type magazineItem struct {
-	Article    *Article `json:"article"`
-	Thread     string   `json:"thread"`
-	ThreadSlug string   `json:"thread_slug"`
-	Context    string   `json:"context"`
-	ReadTime   int      `json:"read_time"`
-	Difficulty string   `json:"difficulty"`
-	Score      float64  `json:"score"`
-	TileSize   string   `json:"tile_size"` // "large", "medium", "small"
-	Completed  bool     `json:"completed"`
+	Article    *magazineArticle `json:"article"`
+	Thread     string           `json:"thread"`
+	ThreadSlug string           `json:"thread_slug"`
+	Context    string           `json:"context"`
+	ReadTime   int              `json:"read_time"`
+	Difficulty string           `json:"difficulty"`
+	Score      float64          `json:"score"`
+	TileSize   string           `json:"tile_size"`
+	Completed  bool             `json:"completed"`
+}
+
+type magazineArticle struct {
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	Subtitle  string `json:"subtitle"`
+	Author    string `json:"author"`
+	WordCount int    `json:"word_count"`
+	CoverImage string `json:"cover_image_url"`
+	PitchLine string `json:"pitch_line"`
 }
 
 func (s *server) handleMagazine(w http.ResponseWriter, r *http.Request) {
@@ -31,25 +39,68 @@ func (s *server) handleMagazine(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildMagazine(db *sql.DB, threadFilter string) ([]magazineItem, error) {
-	scores := engagementScores(db)
-	completedSet := completedArticles(db)
-
 	var query string
 	var args []any
 
 	if threadFilter != "" {
-		query = `SELECT ` + articleSelectCols + `
+		query = `SELECT a.id, a.title, a.subtitle, a.author, a.word_count, a.cover_image_url,
+				COALESCE(p.pitch_line, ''),
+				COALESCE(t.title, ''), COALESCE(t.slug, ''),
+				COALESCE(m.context, ''), COALESCE(m.read_time, 0), COALESCE(m.difficulty, ''),
+				COALESCE(eng.score, 0),
+				CASE WHEN comp.article_id IS NOT NULL THEN 1 ELSE 0 END
 			FROM articles a
 			LEFT JOIN pitches p ON p.article_id = a.id
 			INNER JOIN article_threads at2 ON at2.article_id = a.id
-			INNER JOIN threads t ON t.id = at2.thread_id AND t.slug = ?
-			ORDER BY a.published_at DESC`
+			INNER JOIN threads tf ON tf.id = at2.thread_id AND tf.slug = ?
+			LEFT JOIN (
+				SELECT at3.article_id, t2.title, t2.slug,
+					ROW_NUMBER() OVER (PARTITION BY at3.article_id ORDER BY at3.relevance DESC) as rn
+				FROM article_threads at3
+				JOIN threads t2 ON t2.id = at3.thread_id
+			) t ON t.article_id = a.id AND t.rn = 1
+			LEFT JOIN article_meta m ON m.article_id = a.id
+			LEFT JOIN (
+				SELECT article_id,
+					SUM(CASE type WHEN 'opened' THEN 1.0 WHEN 'read_started' THEN 2.0
+						WHEN 'completed' THEN 5.0
+						WHEN 'abandoned' THEN scroll_pct / 50.0
+						ELSE scroll_pct / 100.0 END) as score
+				FROM events GROUP BY article_id
+			) eng ON eng.article_id = a.id
+			LEFT JOIN (
+				SELECT DISTINCT article_id FROM events WHERE type = 'completed'
+			) comp ON comp.article_id = a.id
+			ORDER BY COALESCE(eng.score, 0) DESC, a.published_at DESC`
 		args = []any{threadFilter}
 	} else {
-		query = `SELECT ` + articleSelectCols + `
+		query = `SELECT a.id, a.title, a.subtitle, a.author, a.word_count, a.cover_image_url,
+				COALESCE(p.pitch_line, ''),
+				COALESCE(t.title, ''), COALESCE(t.slug, ''),
+				COALESCE(m.context, ''), COALESCE(m.read_time, 0), COALESCE(m.difficulty, ''),
+				COALESCE(eng.score, 0),
+				CASE WHEN comp.article_id IS NOT NULL THEN 1 ELSE 0 END
 			FROM articles a
 			LEFT JOIN pitches p ON p.article_id = a.id
-			ORDER BY a.published_at DESC`
+			LEFT JOIN (
+				SELECT at3.article_id, t2.title, t2.slug,
+					ROW_NUMBER() OVER (PARTITION BY at3.article_id ORDER BY at3.relevance DESC) as rn
+				FROM article_threads at3
+				JOIN threads t2 ON t2.id = at3.thread_id
+			) t ON t.article_id = a.id AND t.rn = 1
+			LEFT JOIN article_meta m ON m.article_id = a.id
+			LEFT JOIN (
+				SELECT article_id,
+					SUM(CASE type WHEN 'opened' THEN 1.0 WHEN 'read_started' THEN 2.0
+						WHEN 'completed' THEN 5.0
+						WHEN 'abandoned' THEN scroll_pct / 50.0
+						ELSE scroll_pct / 100.0 END) as score
+				FROM events GROUP BY article_id
+			) eng ON eng.article_id = a.id
+			LEFT JOIN (
+				SELECT DISTINCT article_id FROM events WHERE type = 'completed'
+			) comp ON comp.article_id = a.id
+			ORDER BY COALESCE(eng.score, 0) DESC, a.published_at DESC`
 	}
 
 	rows, err := db.Query(query, args...)
@@ -58,120 +109,31 @@ func buildMagazine(db *sql.DB, threadFilter string) ([]magazineItem, error) {
 	}
 	defer rows.Close()
 
-	threadMap := articleThreadMap(db)
-
 	var items []magazineItem
 	for rows.Next() {
-		a, err := scanArticle(rows)
+		var art magazineArticle
+		var it magazineItem
+		var completed int
+		err := rows.Scan(
+			&art.ID, &art.Title, &art.Subtitle, &art.Author, &art.WordCount, &art.CoverImage,
+			&art.PitchLine,
+			&it.Thread, &it.ThreadSlug,
+			&it.Context, &it.ReadTime, &it.Difficulty,
+			&it.Score, &completed,
+		)
 		if err != nil {
 			continue
 		}
-		a.BodyHTML = ""
-		a.PlainText = ""
-
-		var ctx string
-		var readTime int
-		var diff string
-		db.QueryRow(`SELECT context, read_time, difficulty FROM article_meta WHERE article_id = ?`, a.ID).
-			Scan(&ctx, &readTime, &diff)
-
-		score := scores[a.ID]
-
-		items = append(items, magazineItem{
-			Article:    a,
-			Thread:     threadMap[a.ID].title,
-			ThreadSlug: threadMap[a.ID].slug,
-			Context:    ctx,
-			ReadTime:   readTime,
-			Difficulty: diff,
-			Score:      score,
-			Completed:  completedSet[a.ID],
-		})
+		it.Article = &art
+		it.Completed = completed == 1
+		if it.Context == "" && art.PitchLine != "" {
+			it.Context = art.PitchLine
+		}
+		items = append(items, it)
 	}
 
 	assignTileSizes(items)
-
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].Score > items[j].Score
-	})
-
 	return items, nil
-}
-
-type threadInfo struct {
-	title string
-	slug  string
-}
-
-func articleThreadMap(db *sql.DB) map[int64]threadInfo {
-	m := map[int64]threadInfo{}
-	rows, err := db.Query(`
-		SELECT at2.article_id, t.title, t.slug
-		FROM article_threads at2
-		JOIN threads t ON t.id = at2.thread_id
-		ORDER BY at2.relevance DESC`)
-	if err != nil {
-		return m
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var aid int64
-		var title, slug string
-		rows.Scan(&aid, &title, &slug)
-		if _, ok := m[aid]; !ok {
-			m[aid] = threadInfo{title, slug}
-		}
-	}
-	return m
-}
-
-func engagementScores(db *sql.DB) map[int64]float64 {
-	scores := map[int64]float64{}
-
-	rows, err := db.Query(`
-		SELECT article_id, type, scroll_pct, created_at
-		FROM events ORDER BY created_at`)
-	if err != nil {
-		return scores
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var aid int64
-		var typ string
-		var pct int
-		var ts string
-		rows.Scan(&aid, &typ, &pct, &ts)
-
-		switch typ {
-		case "opened":
-			scores[aid] += 1
-		case "read_started":
-			scores[aid] += 2
-		case "completed":
-			scores[aid] += 5
-		case "abandoned":
-			scores[aid] += float64(pct) / 50.0
-		case "scrolled":
-			scores[aid] += float64(pct) / 100.0
-		}
-	}
-	return scores
-}
-
-func completedArticles(db *sql.DB) map[int64]bool {
-	m := map[int64]bool{}
-	rows, err := db.Query(`SELECT DISTINCT article_id FROM events WHERE type = 'completed'`)
-	if err != nil {
-		return m
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int64
-		rows.Scan(&id)
-		m[id] = true
-	}
-	return m
 }
 
 func assignTileSizes(items []magazineItem) {
@@ -179,15 +141,6 @@ func assignTileSizes(items []magazineItem) {
 		return
 	}
 
-	var maxScore float64
-	for _, it := range items {
-		if it.Score > maxScore {
-			maxScore = it.Score
-		}
-	}
-
-	// Also consider metadata richness: articles with cover images, context,
-	// and longer read times deserve more visual space.
 	for i := range items {
 		richness := 0.0
 		if items[i].Article.CoverImage != "" {
@@ -202,14 +155,12 @@ func assignTileSizes(items []magazineItem) {
 		items[i].Score += richness
 	}
 
-	// Recompute max after richness boost.
-	maxScore = 0
+	var maxScore float64
 	for _, it := range items {
 		if it.Score > maxScore {
 			maxScore = it.Score
 		}
 	}
-
 	if maxScore == 0 {
 		maxScore = 1
 	}
@@ -226,7 +177,6 @@ func assignTileSizes(items []magazineItem) {
 		}
 	}
 
-	// Ensure variety: cap large tiles at ~20% of total.
 	largeCount := 0
 	maxLarge := int(math.Max(2, math.Ceil(float64(len(items))*0.2)))
 	for i := range items {
@@ -237,26 +187,4 @@ func assignTileSizes(items []magazineItem) {
 			}
 		}
 	}
-
-	// Avoid metadata-only tiles: if themes/context exist, use
-	// the JSON themes for tag display.
-	for i := range items {
-		if items[i].Context == "" && items[i].Article.PitchLine != "" {
-			items[i].Context = items[i].Article.PitchLine
-		}
-	}
-
-	// Parse themes from article_meta for richer display.
-	// (themes are stored as JSON array in article_meta.themes)
-}
-
-func loadArticleThemes(db *sql.DB, articleID int64) []string {
-	var raw sql.NullString
-	db.QueryRow(`SELECT themes FROM article_meta WHERE article_id = ?`, articleID).Scan(&raw)
-	if !raw.Valid {
-		return nil
-	}
-	var themes []string
-	json.Unmarshal([]byte(raw.String), &themes)
-	return themes
 }

@@ -325,28 +325,22 @@ async function openMagazine(threadSlug) {
   const filterBar = $('magazine-filters');
   filterBar.innerHTML = '';
 
-  const url = threadSlug ? '/api/magazine?thread=' + encodeURIComponent(threadSlug) : '/api/magazine';
-  const res = await api(url);
+  const magUrl = threadSlug ? '/api/magazine?thread=' + encodeURIComponent(threadSlug) : '/api/magazine';
+  const [res, threadsRes] = await Promise.all([api(magUrl), api('/api/threads')]);
   const items = await res.json();
+  const threads = await threadsRes.json();
 
-  // Build thread filter chips.
-  const threads = new Map();
-  for (const it of items) {
-    if (it.thread && !threads.has(it.thread_slug)) {
-      threads.set(it.thread_slug, it.thread);
-    }
-  }
-  if (threads.size > 0) {
+  if (threads && threads.length) {
     const allChip = document.createElement('button');
     allChip.className = 'mag-filter' + (!threadSlug ? ' active' : '');
     allChip.textContent = 'All';
     allChip.onclick = () => openMagazine();
     filterBar.appendChild(allChip);
-    for (const [slug, title] of threads) {
+    for (const t of threads) {
       const chip = document.createElement('button');
-      chip.className = 'mag-filter' + (threadSlug === slug ? ' active' : '');
-      chip.textContent = title;
-      chip.onclick = () => openMagazine(slug);
+      chip.className = 'mag-filter' + (threadSlug === t.slug ? ' active' : '');
+      chip.textContent = t.title;
+      chip.onclick = () => openMagazine(t.slug);
       filterBar.appendChild(chip);
     }
   }
