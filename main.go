@@ -92,6 +92,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/issue/{id}", s.auth.require(s.handleGetIssue))
 	mux.HandleFunc("DELETE /api/issue/{id}", s.auth.require(s.handleDeleteIssue))
 	mux.HandleFunc("POST /api/issue/{id}/merge/{other}", s.auth.require(s.handleMergeIssues))
+	mux.HandleFunc("GET /api/taste", s.auth.require(s.handleTaste))
 
 	// External cron trigger (token-protected, no session needed)
 	mux.HandleFunc("POST /internal/cron/daily", s.handleCron)

@@ -78,6 +78,7 @@
   <!-- Magazine link -->
   <section class="magazine-link-section">
     <button class="magazine-link" onclick="openMagazine()">Browse the magazine &#8594;</button>
+    <button class="magazine-link taste-link" onclick="openTaste()">Your taste &#8594;</button>
   </section>
 
   <!-- Empty state -->
@@ -143,6 +144,17 @@
   </div>
   <div id="magazine-filters" class="mag-filters"></div>
   <div id="magazine-grid" class="mag-grid"></div>
+</div>
+
+<!-- Taste profile -->
+<div id="taste" class="screen hidden">
+  <div class="taste-header">
+    <button class="reader-back" onclick="backToHome()" style="position:static;background:transparent;backdrop-filter:none;color:var(--muted);padding:0">&#8592; Back</button>
+    <h2 class="taste-title">Your Taste</h2>
+  </div>
+  <div id="taste-content" class="taste-content">
+    <div class="loading">Loading your profile...</div>
+  </div>
 </div>
 
 <!-- Thread view -->

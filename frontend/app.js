@@ -35,7 +35,7 @@ function showLogin() {
 }
 
 function hideAll() {
-  for (const id of ['login', 'home', 'reader', 'thread-view', 'magazine', 'issue-view', 'settings']) hide($(id));
+  for (const id of ['login', 'home', 'reader', 'thread-view', 'magazine', 'issue-view', 'taste', 'settings']) hide($(id));
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -625,6 +625,132 @@ async function openAllIssues() {
 }
 
 // ---------- magazine view ----------
+// ---------- taste profile ----------
+async function openTaste() {
+  hideAll(); show($('taste'));
+  window.scrollTo(0, 0);
+
+  const content = $('taste-content');
+  content.innerHTML = '<div class="loading">Loading your profile...</div>';
+
+  try {
+    const res = await api('/api/taste');
+    const d = await res.json();
+    renderTaste(content, d);
+  } catch (e) {
+    content.innerHTML = '<p class="empty-msg">Could not load taste profile.</p>';
+  }
+}
+
+function renderTaste(el, d) {
+  const n = d.numbers;
+  let html = '';
+
+  // Numbers grid
+  html += '<div class="taste-numbers">';
+  html += tasteNum(n.total_articles, 'Articles saved');
+  html += tasteNum(n.completed, 'Completed');
+  html += tasteNum(n.loved, 'Loved');
+  html += tasteNum(n.highlights, 'Highlights');
+  html += tasteNum(n.queries_made, 'Queries');
+  html += tasteNum(n.avg_scroll_depth + '%', 'Avg depth');
+  html += tasteNum(n.this_week, 'This week');
+  html += tasteNum(n.this_month, 'This month');
+  html += '</div>';
+
+  // Read length distribution
+  const rl = d.read_lengths;
+  const rlTotal = rl.short + rl.medium + rl.long || 1;
+  html += '<div class="taste-section">';
+  html += '<h3 class="taste-section-title">Reading style</h3>';
+  html += '<div class="taste-bars">';
+  html += tasteBar('Short (&lt;5 min)', rl.short, rlTotal);
+  html += tasteBar('Medium (5–15 min)', rl.medium, rlTotal);
+  html += tasteBar('Long (15+ min)', rl.long, rlTotal);
+  html += '</div></div>';
+
+  // Theme heatmap
+  if (d.themes && d.themes.length) {
+    html += '<div class="taste-section">';
+    html += '<h3 class="taste-section-title">Your themes</h3>';
+    html += '<div class="taste-themes">';
+    const maxC = d.themes[0].count;
+    for (const t of d.themes) {
+      const opacity = 0.3 + (t.count / maxC) * 0.7;
+      html += `<span class="taste-theme" style="opacity:${opacity}">${escapeHTML(t.theme)} <small>${t.count}</small></span>`;
+    }
+    html += '</div></div>';
+  }
+
+  // Top threads
+  if (d.top_threads.length) {
+    html += '<div class="taste-section">';
+    html += '<h3 class="taste-section-title">Top threads</h3>';
+    for (const t of d.top_threads) {
+      const pct = Math.round(t.read_count / (t.article_count || 1) * 100);
+      html += `<div class="taste-row">
+        <span class="taste-row-icon">${t.icon || ''}</span>
+        <span class="taste-row-label">${escapeHTML(t.title)}</span>
+        <span class="taste-row-stat">${t.read_count} read · ${pct}%</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Top authors
+  if (d.top_authors.length) {
+    html += '<div class="taste-section">';
+    html += '<h3 class="taste-section-title">Favorite authors</h3>';
+    for (const a of d.top_authors) {
+      html += `<div class="taste-row">
+        <span class="taste-row-label">${escapeHTML(a.name)}</span>
+        <span class="taste-row-stat">${a.read_count} read of ${a.articles}</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Most-engaged articles
+  if (d.top_articles.length) {
+    html += '<div class="taste-section">';
+    html += '<h3 class="taste-section-title">Most engaged</h3>';
+    for (const a of d.top_articles) {
+      html += `<div class="taste-row taste-row-clickable" onclick="openArticle(${a.id})">
+        <span class="taste-row-label">${escapeHTML(a.title)}</span>
+        <span class="taste-row-stat">${escapeHTML(a.author)}</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // Queries
+  if (d.queries.length) {
+    html += '<div class="taste-section">';
+    html += '<h3 class="taste-section-title">Your queries</h3>';
+    for (const q of d.queries) {
+      html += `<div class="taste-row">
+        <span class="taste-row-label">${escapeHTML(q.title)}</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function tasteNum(val, label) {
+  return `<div class="taste-num"><div class="taste-num-val">${val}</div><div class="taste-num-label">${label}</div></div>`;
+}
+
+function tasteBar(label, count, total) {
+  const pct = Math.round(count / total * 100);
+  return `<div class="taste-bar-row">
+    <span class="taste-bar-label">${label}</span>
+    <div class="taste-bar-track"><div class="taste-bar-fill" style="width:${pct}%"></div></div>
+    <span class="taste-bar-val">${count}</span>
+  </div>`;
+}
+
 async function openMagazine(threadSlug) {
   hideAll(); show($('magazine'));
   window.scrollTo(0, 0);
