@@ -1096,8 +1096,8 @@ function generatedCover(text) {
   const hue1 = abs % 360;
   const hue2 = (hue1 + 40 + (abs % 60)) % 360;
   const hue3 = (hue2 + 60 + (abs % 80)) % 360;
-  const sat = 25 + (abs % 30);
-  const light = 12 + (abs % 10);
+  const sat = 20 + (abs % 25);
+  const light = 78 + (abs % 10);
   const angle = abs % 360;
   const grad = `linear-gradient(${angle}deg, hsl(${hue1},${sat}%,${light}%) 0%, hsl(${hue2},${sat + 10}%,${light + 5}%) 50%, hsl(${hue3},${sat}%,${light + 3}%) 100%)`;
 
@@ -1112,12 +1112,12 @@ function generatedCover(text) {
     const opacity = 0.06 + (seed % 8) / 100;
     const shapeType = seed % 3;
     if (shapeType === 0) {
-      shapes.push(`<circle cx="${x}%" cy="${y}%" r="${size}" fill="white" opacity="${opacity}"/>`);
+      shapes.push(`<circle cx="${x}%" cy="${y}%" r="${size}" fill="black" opacity="${opacity}"/>`);
     } else if (shapeType === 1) {
-      shapes.push(`<rect x="${x - 5}%" y="${y - 5}%" width="${size}" height="${size}" fill="white" opacity="${opacity}" transform="rotate(${seed % 45} ${x} ${y})"/>`);
+      shapes.push(`<rect x="${x - 5}%" y="${y - 5}%" width="${size}" height="${size}" fill="black" opacity="${opacity}" transform="rotate(${seed % 45} ${x} ${y})"/>`);
     } else {
       const pts = `${x},${y - size / 2} ${x - size / 2},${y + size / 2} ${x + size / 2},${y + size / 2}`;
-      shapes.push(`<polygon points="${pts}" fill="white" opacity="${opacity}"/>`);
+      shapes.push(`<polygon points="${pts}" fill="black" opacity="${opacity}"/>`);
     }
   }
 
@@ -1125,7 +1125,7 @@ function generatedCover(text) {
   const letter = (text[0] || '').toUpperCase();
   const letterX = 50 + (abs % 30) - 15;
   const letterY = 50 + ((abs >> 4) % 30) - 15;
-  shapes.push(`<text x="${letterX}%" y="${letterY}%" font-size="120" font-family="serif" fill="white" opacity="0.05" text-anchor="middle" dominant-baseline="central">${letter}</text>`);
+  shapes.push(`<text x="${letterX}%" y="${letterY}%" font-size="120" font-family="serif" fill="black" opacity="0.05" text-anchor="middle" dominant-baseline="central">${letter}</text>`);
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">${shapes.join('')}</svg>`;
   const encoded = 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
