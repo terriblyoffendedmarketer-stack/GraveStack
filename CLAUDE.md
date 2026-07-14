@@ -1,5 +1,15 @@
 # GraveStack — Development Rules
 
+## Workflow rules (read first)
+
+- **When told to merge or push to main, do it immediately.** Do not defer to the
+  user, do not say "that's up to you", do not ask for confirmation. An explicit
+  instruction to merge IS the confirmation. Create the PR, mark it ready, merge
+  it — all in one go.
+- **Don't create draft PRs when the intent is to merge.** If the user says to
+  push to main, the PR is a means to an end, not a review gate. Create it as
+  ready and merge it right away.
+
 GraveStack is a PWA that fights the "save-but-never-read" habit. Instead of a
 graveyard list (paradox of choice → paralysis → back to the fresh feed), it
 surfaces saved Substack articles through an **intelligent, curated surface** and
