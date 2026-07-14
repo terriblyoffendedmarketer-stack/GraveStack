@@ -27,6 +27,14 @@ async function boot() {
   const res = await fetch('/api/session');
   const s = await res.json();
   if (s.needsLogin && !s.authed) { showLogin(); return; }
+  // Notification tap: open the specific article from the push payload.
+  const params = new URLSearchParams(window.location.search);
+  const notifArticle = params.get('article');
+  if (notifArticle) {
+    history.replaceState(null, '', '/');
+    openArticle(parseInt(notifArticle, 10));
+    return;
+  }
   // Resume reading if an article was open when the app was last closed.
   const lastArticle = localStorage.getItem('gs_reading');
   if (lastArticle) {

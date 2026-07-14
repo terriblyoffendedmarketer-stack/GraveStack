@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -120,7 +121,7 @@ func buildDailyPayload(db *sql.DB, cfg Config) (pushPayload, error) {
 		Icon:      "/icons/icon-192.png",
 		Badge:     "/icons/badge.png",
 		ArticleID: a.ID,
-		URL:       "/",
+		URL:       fmt.Sprintf("/?article=%d", a.ID),
 	}, nil
 }
 
