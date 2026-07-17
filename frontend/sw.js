@@ -1,5 +1,5 @@
 // GraveStack service worker: push delivery + minimal shell cache.
-const CACHE = 'gravestack-v2';
+const CACHE = 'gravestack-v3';
 const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -19,7 +19,10 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/internal/')) return;
   e.respondWith(
     fetch(e.request).then((res) => {
-      if (e.request.method === 'GET' && res.ok && url.origin === location.origin) {
+      const cacheable = url.origin === location.origin
+        || url.hostname === 'fonts.googleapis.com'
+        || url.hostname === 'fonts.gstatic.com';
+      if (e.request.method === 'GET' && res.ok && cacheable) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
       }
