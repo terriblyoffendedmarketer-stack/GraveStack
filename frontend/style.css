@@ -331,6 +331,11 @@ body { overscroll-behavior-y: none; }
 .hint { color: var(--muted); font-size: .8rem; line-height: 1.4; }
 details { margin-top: 10px; }
 summary { color: var(--accent); cursor: pointer; font-size: .9rem; }
+.install-btn { display: block; width: 100%; padding: 12px; border-radius: 8px; border: none;
+  font-weight: 600; font-size: 1rem; cursor: pointer; text-align: center; text-decoration: none;
+  margin-top: 8px; }
+.install-apk { background: var(--accent); color: #fff; }
+.install-pwa { background: var(--fg); color: var(--bg); }
 .library-section summary { color: var(--muted); }
 #library { margin-top: 12px; }
 .lib-topic { color: var(--accent); font-size: .8rem; text-transform: uppercase;

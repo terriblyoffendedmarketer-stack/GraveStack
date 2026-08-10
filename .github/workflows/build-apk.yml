@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'android-wrapper/**'
+      - '.github/workflows/build-apk.yml'
 
 jobs:
   build:
@@ -38,6 +39,18 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
+
+      - name: Copy APK for serving
+        working-directory: .
+        run: cp android-wrapper/android/app/build/outputs/apk/debug/app-debug.apk frontend/gravestack.apk
+
+      - name: Commit updated APK
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add frontend/gravestack.apk android-wrapper/gravestack.apk
+          git diff --cached --quiet && echo "No APK changes" || git commit -m "Update built APK [skip ci]" && git push
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

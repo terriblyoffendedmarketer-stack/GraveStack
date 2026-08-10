@@ -971,6 +971,7 @@ async function openMagazine(threadSlug) {
 function openSettings() {
   hideAll(); show($('settings'));
   loadSettings();
+  setupInstallSection();
 }
 function closeSettings() { loadHome(); }
 $('gear').addEventListener('click', openSettings);
@@ -1152,5 +1153,49 @@ function urlBase64ToUint8Array(base64String) {
 function registerSW() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
+
+// ---------- install prompt ----------
+function setupInstallSection() {
+  const el = $('install-options');
+  if (!el) return;
+  const isCapacitor = navigator.userAgent.includes('GraveStack') ||
+    (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+    navigator.standalone === true;
+  if (isCapacitor || isStandalone) {
+    $('install-section').style.display = 'none';
+    return;
+  }
+  const isAndroid = /android/i.test(navigator.userAgent);
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  let html = '';
+  if (isAndroid) {
+    html += '<a href="/gravestack.apk" class="install-btn install-apk" download>Download Android app (.apk)</a>';
+    html += '<p class="hint">Install once — the app updates itself from the server.</p>';
+  } else if (isIOS) {
+    html += '<p class="hint">On Safari, tap the share button <b>(&#9757;)</b> then <b>"Add to Home Screen"</b> to install as an app.</p>';
+  } else {
+    html += '<button class="install-btn install-pwa" id="pwa-install-btn" style="display:none">Install as app</button>';
+    html += '<a href="/gravestack.apk" class="install-btn install-apk" download>Download Android APK</a>';
+    html += '<p class="hint">On mobile: download the APK for Android, or use "Add to Home Screen" on iOS.</p>';
+  }
+  el.innerHTML = html;
+}
+
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = $('pwa-install-btn');
+  if (btn) {
+    btn.style.display = '';
+    btn.addEventListener('click', async () => {
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      btn.style.display = 'none';
+    });
+  }
+});
 
 boot();
