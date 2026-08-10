@@ -1,0 +1,12 @@
+{
+  "appId": "dev.gravestack.app",
+  "appName": "GraveStack",
+  "webDir": "www",
+  "server": {
+    "url": "https://gravestack.fly.dev",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
