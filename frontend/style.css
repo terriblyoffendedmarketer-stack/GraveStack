@@ -29,7 +29,7 @@ body { overscroll-behavior-y: none; }
 
 /* ---------- Home ---------- */
 .home-header { display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px 8px; max-width: var(--max-w); margin: 0 auto; }
+  padding: max(16px, env(safe-area-inset-top)) 20px 8px; max-width: var(--max-w); margin: 0 auto; }
 .home-logo { font-family: var(--serif); font-size: 1.3rem; margin: 0; font-weight: 400;
   color: var(--muted); letter-spacing: .01em; }
 .header-actions { display: flex; align-items: center; gap: 4px; }
@@ -315,7 +315,7 @@ body { overscroll-behavior-y: none; }
 
 /* ---------- Settings ---------- */
 .settings { background: var(--bg); overflow-y: auto; }
-.settings-inner { max-width: 620px; margin: 0 auto; padding: 20px 20px 80px; }
+.settings-inner { max-width: 620px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 20px 80px; }
 .settings h2 { font-family: var(--serif); }
 .settings section { border-top: 1px solid var(--line); padding: 18px 0; }
 .settings h3 { margin: 0 0 12px; font-size: 1rem; }
@@ -395,7 +395,7 @@ summary { color: var(--accent); cursor: pointer; font-size: .9rem; }
 .highlight-delete:hover { opacity: 1; color: var(--accent); }
 
 /* Taste profile */
-.taste-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px 8px; }
+.taste-header { display: flex; align-items: center; gap: 12px; padding: max(16px, env(safe-area-inset-top)) 20px 8px; }
 .taste-title { font-size: 1.3rem; margin: 0; }
 .taste-content { padding: 0 20px 40px; }
 .taste-link { border-color: var(--muted) !important; color: var(--muted) !important; margin-top: 8px; }
