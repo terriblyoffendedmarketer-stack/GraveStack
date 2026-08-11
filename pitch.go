@@ -178,9 +178,21 @@ func generatePitchesFor(db *sql.DB, cfg Config, ids []int64) {
 
 // ensurePitch generates a pitch on demand if one is missing (e.g. sync happened
 // before a key was set). Returns the article with pitch fields populated.
+func isBadPitch(s string) bool {
+	low := strings.ToLower(s)
+	return strings.Contains(low, "cannot pitch") ||
+		strings.Contains(low, "no content") ||
+		strings.Contains(low, "no article content") ||
+		strings.Contains(low, "not provided") ||
+		strings.Contains(low, "unable to pitch")
+}
+
 func ensurePitch(db *sql.DB, cfg Config, a *Article) {
-	if a.PitchLine != "" {
+	if a.PitchLine != "" && !isBadPitch(a.PitchLine) {
 		return
+	}
+	if a.PlainText == "" && a.BodyHTML != "" {
+		a.PlainText = htmlToText(a.BodyHTML)
 	}
 	pr, err := generatePitch(cfg, a)
 	if err != nil {

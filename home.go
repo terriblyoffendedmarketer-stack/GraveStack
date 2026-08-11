@@ -159,11 +159,11 @@ func buildHome(db *sql.DB, cfg Config) (*homeResponse, error) {
 
 	// Track which articles still need real pitches generated.
 	var pending []int64
-	if featured.PitchLine == featured.Subtitle || featured.PitchLine == "" {
+	if featured.PitchLine == featured.Subtitle || featured.PitchLine == "" || isBadPitch(featured.PitchLine) {
 		pending = append(pending, featured.ID)
 	}
 	for _, s := range home.Suggestions {
-		if s.Article.PitchLine == s.Article.Subtitle || s.Article.PitchLine == "" {
+		if s.Article.PitchLine == s.Article.Subtitle || s.Article.PitchLine == "" || isBadPitch(s.Article.PitchLine) {
 			pending = append(pending, s.Article.ID)
 		}
 	}
@@ -178,11 +178,14 @@ func buildHome(db *sql.DB, cfg Config) (*homeResponse, error) {
 
 // fallbackPitch sets a pitch from cached data or subtitle — never calls the AI.
 func fallbackPitch(a *Article) {
-	if a.PitchLine != "" {
+	if a.PitchLine != "" && !isBadPitch(a.PitchLine) {
 		return
 	}
 	if a.Subtitle != "" {
 		a.PitchLine = a.Subtitle
+	}
+	if a.PlainText == "" && a.BodyHTML != "" {
+		a.PlainText = htmlToText(a.BodyHTML)
 	}
 	if a.PullQuote == "" {
 		a.PullQuote = firstStrongSentence(a.PlainText)

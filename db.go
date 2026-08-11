@@ -194,14 +194,16 @@ func setSetting(db *sql.DB, key, value string) error {
 func scanArticle(s interface{ Scan(...any) error }) (*Article, error) {
 	var a Article
 	var pitchLine, pullQuote sql.NullString
+	var plainText sql.NullString
 	err := s.Scan(
 		&a.ID, &a.SubstackID, &a.URL, &a.Subdomain, &a.Slug, &a.Title, &a.Subtitle,
 		&a.Author, &a.PublishedAt, &a.WordCount, &a.CoverImage, &a.BodyHTML,
-		&a.Topic, &a.IsPaywalled, &a.SavedRank, &a.SyncedAt, &pitchLine, &pullQuote,
+		&plainText, &a.Topic, &a.IsPaywalled, &a.SavedRank, &a.SyncedAt, &pitchLine, &pullQuote,
 	)
 	if err != nil {
 		return nil, err
 	}
+	a.PlainText = plainText.String
 	a.PitchLine = pitchLine.String
 	a.PullQuote = pullQuote.String
 	return &a, nil
@@ -210,7 +212,7 @@ func scanArticle(s interface{ Scan(...any) error }) (*Article, error) {
 const articleSelectCols = `
 	a.id, a.substack_id, a.url, a.subdomain, a.slug, a.title, a.subtitle,
 	a.author, a.published_at, a.word_count, a.cover_image_url, a.body_html,
-	a.topic, a.is_paywalled, a.saved_rank, a.synced_at,
+	a.plain_text, a.topic, a.is_paywalled, a.saved_rank, a.synced_at,
 	p.pitch_line, p.pull_quote`
 
 func getArticle(db *sql.DB, id int64) (*Article, error) {
