@@ -1198,4 +1198,60 @@ window.addEventListener('beforeinstallprompt', (e) => {
   }
 });
 
+// ---------- search ----------
+let searchTimeout = null;
+
+function toggleSearch() {
+  const bar = $('search-bar');
+  if (bar.classList.contains('hidden')) {
+    show(bar);
+    $('search-input').focus();
+  } else {
+    closeSearch();
+  }
+}
+
+function closeSearch() {
+  hide($('search-bar'));
+  hide($('search-results'));
+  $('search-input').value = '';
+}
+
+$('search-input').addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  const q = e.target.value.trim();
+  if (!q) { hide($('search-results')); return; }
+  searchTimeout = setTimeout(() => runSearch(q), 250);
+});
+
+$('search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSearch();
+});
+
+async function runSearch(q) {
+  try {
+    const res = await api('/api/search?q=' + encodeURIComponent(q));
+    const items = await res.json();
+    const box = $('search-results');
+    if (!items.length) {
+      box.innerHTML = '<div class="search-empty">No articles found</div>';
+      show(box);
+      return;
+    }
+    let html = '';
+    for (const it of items) {
+      const parts = [];
+      if (it.author) parts.push(escapeHTML(it.author));
+      if (it.word_count) parts.push(readingTime(it.word_count));
+      html += `<div class="search-item" onclick="openArticle(${it.id});closeSearch()">
+        <div class="search-item-title">${escapeHTML(it.title)}</div>
+        ${it.subtitle ? `<div class="search-item-sub">${escapeHTML(it.subtitle)}</div>` : ''}
+        <div class="search-item-meta">${parts.join(' · ')}</div>
+      </div>`;
+    }
+    box.innerHTML = html;
+    show(box);
+  } catch (e) {}
+}
+
 boot();

@@ -30,11 +30,19 @@
   <header class="home-header">
     <h1 class="home-logo">GraveStack</h1>
     <div class="header-actions">
+      <button class="header-icon" onclick="toggleSearch()" aria-label="Search" title="Search" id="search-toggle">&#128269;</button>
       <button class="header-icon" onclick="openHistory()" aria-label="History" title="History">&#128337;</button>
       <button class="header-icon" onclick="openTaste()" aria-label="Your Taste" title="Your Taste">&#9733;</button>
       <button id="gear" class="gear" aria-label="Settings">&#9881;</button>
     </div>
   </header>
+  <div id="search-bar" class="search-bar hidden">
+    <div class="search-bar-inner">
+      <input type="text" id="search-input" placeholder="Search articles…" autocomplete="off">
+      <button class="search-close" onclick="closeSearch()" aria-label="Close search">&times;</button>
+    </div>
+    <div id="search-results" class="search-results hidden"></div>
+  </div>
 
   <!-- Featured article (big tile) -->
   <section id="featured" class="featured" role="button" tabindex="0">

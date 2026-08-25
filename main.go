@@ -96,6 +96,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/article/{id}/notes", s.auth.require(s.handleListNotes))
 	mux.HandleFunc("POST /api/article/{id}/notes", s.auth.require(s.handleSaveNote))
 	mux.HandleFunc("GET /api/history", s.auth.require(s.handleHistory))
+	mux.HandleFunc("GET /api/search", s.auth.require(s.handleSearch))
 
 	// External cron trigger (token-protected, no session needed)
 	mux.HandleFunc("POST /internal/cron/daily", s.handleCron)
@@ -762,6 +763,61 @@ func (s *server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		items = []historyItem{}
 	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	words := strings.Fields(strings.ToLower(q))
+	if len(words) == 0 {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	var clauses []string
+	var args []any
+	for _, w := range words {
+		pattern := "%" + w + "%"
+		clauses = append(clauses, "(LOWER(a.title) LIKE ? OR LOWER(COALESCE(a.subtitle,'')) LIKE ?)")
+		args = append(args, pattern, pattern)
+	}
+	query := `SELECT a.id, a.title, a.subtitle, a.author, a.word_count, a.cover_image_url
+		FROM articles a
+		WHERE ` + strings.Join(clauses, " AND ") + `
+		ORDER BY a.title COLLATE NOCASE
+		LIMIT 20`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type result struct {
+		ID        int64  `json:"id"`
+		Title     string `json:"title"`
+		Subtitle  string `json:"subtitle"`
+		Author    string `json:"author"`
+		WordCount int    `json:"word_count"`
+		CoverURL  string `json:"cover_image_url"`
+	}
+	var results []result
+	for rows.Next() {
+		var item result
+		if err := rows.Scan(&item.ID, &item.Title, &item.Subtitle, &item.Author, &item.WordCount, &item.CoverURL); err != nil {
+			continue
+		}
+		results = append(results, item)
+	}
+	if results == nil {
+		results = []result{}
+	}
+	writeJSON(w, http.StatusOK, results)
 }
 
 // handleAsk is now replaced by handleAskWithIssues in issues.go.
