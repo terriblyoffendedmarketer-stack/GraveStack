@@ -1,5 +1,5 @@
 // GraveStack service worker: push delivery + minimal shell cache.
-const CACHE = 'gravestack-v3';
+const CACHE = 'gravestack-v4';
 const SHELL = ['/', '/index.html', '/style.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

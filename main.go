@@ -95,6 +95,9 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/taste", s.auth.require(s.handleTaste))
 	mux.HandleFunc("GET /api/article/{id}/notes", s.auth.require(s.handleListNotes))
 	mux.HandleFunc("POST /api/article/{id}/notes", s.auth.require(s.handleSaveNote))
+	mux.HandleFunc("PUT /api/note/{id}", s.auth.require(s.handleUpdateNote))
+	mux.HandleFunc("POST /api/note/{id}", s.auth.require(s.handleUpdateNote))
+	mux.HandleFunc("DELETE /api/note/{id}", s.auth.require(s.handleDeleteNote))
 	mux.HandleFunc("GET /api/history", s.auth.require(s.handleHistory))
 	mux.HandleFunc("GET /api/search", s.auth.require(s.handleSearch))
 
@@ -730,6 +733,42 @@ func (s *server) handleSaveNote(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := res.LastInsertId()
 	writeJSON(w, http.StatusOK, map[string]int64{"id": id})
+}
+
+func (s *server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Text) == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	res, err := s.db.Exec(`UPDATE notes SET text = ? WHERE id = ?`, strings.TrimSpace(body.Text), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	s.db.Exec(`DELETE FROM notes WHERE id = ?`, id)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *server) handleHistory(w http.ResponseWriter, r *http.Request) {

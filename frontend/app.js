@@ -35,13 +35,7 @@ async function boot() {
     openArticle(parseInt(notifArticle, 10));
     return;
   }
-  // Resume reading if an article was open when the app was last closed.
-  const lastArticle = localStorage.getItem('gs_reading');
-  if (lastArticle) {
-    openArticle(parseInt(lastArticle, 10));
-  } else {
-    loadHome();
-  }
+  loadHome();
 }
 
 function showLogin() {
@@ -86,6 +80,28 @@ async function loadHome() {
     if (!data.empty) localStorage.setItem(cacheKey, JSON.stringify(data));
   }
   if (data.empty) { show($('empty')); return; }
+
+  // Whichever article was last opened becomes the hero in the today section.
+  const savedHero = localStorage.getItem('gs_hero');
+  if (savedHero) {
+    try {
+      const hero = JSON.parse(savedHero);
+      if (hero && hero.article) {
+        if (data.featured && data.featured.article && data.featured.article.id !== hero.article.id) {
+          const oldFeatured = data.featured;
+          if (data.suggestions && data.suggestions.length) {
+            const idx = data.suggestions.findIndex(s => s.article && s.article.id === hero.article.id);
+            if (idx !== -1) {
+              data.suggestions[idx] = oldFeatured;
+            }
+          }
+        } else if (data.suggestions && data.suggestions.length) {
+          data.suggestions = data.suggestions.filter(s => s.article && s.article.id !== hero.article.id);
+        }
+        data.featured = hero;
+      }
+    } catch (e) {}
+  }
 
   renderFeatured(data.featured);
   renderSuggestions(data.suggestions || []);
@@ -137,6 +153,46 @@ async function enrichHome(data) {
     }
   } catch (e) {
     // Enrichment is best-effort — page already rendered with fallbacks.
+  }
+}
+
+function setHeroArticle(a) {
+  if (!a) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const cacheKey = 'gs_home_' + today;
+  let homeData = null;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) homeData = JSON.parse(cached);
+  } catch (e) {}
+
+  const heroItem = {
+    article: a,
+    context: a.pitch_line || a.subtitle || '',
+    thread: a.topic || (homeData && homeData.featured ? homeData.featured.thread : ''),
+    read_time: a.word_count ? Math.round(a.word_count / 200) : 0,
+  };
+
+  try {
+    localStorage.setItem('gs_hero', JSON.stringify(heroItem));
+  } catch (e) {}
+
+  if (homeData) {
+    if (homeData.featured && homeData.featured.article && homeData.featured.article.id !== a.id) {
+      const oldFeatured = homeData.featured;
+      if (homeData.suggestions && homeData.suggestions.length) {
+        const idx = homeData.suggestions.findIndex(s => s.article && s.article.id === a.id);
+        if (idx !== -1) {
+          homeData.suggestions[idx] = oldFeatured;
+        }
+      }
+    } else if (homeData.suggestions && homeData.suggestions.length) {
+      homeData.suggestions = homeData.suggestions.filter(s => s.article && s.article.id !== a.id);
+    }
+    homeData.featured = heroItem;
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(homeData));
+    } catch (e) {}
   }
 }
 
@@ -229,10 +285,10 @@ async function openArticle(id) {
   hide($('post-read-feedback'));
   window.scrollTo(0, 0);
 
-  localStorage.setItem('gs_reading', id);
   const res = await api('/api/article/' + id);
   const data = await res.json();
   renderArticle(data.article);
+  setHeroArticle(data.article);
   loadRelated(id);
   loadHighlights(id);
   loadNotes(id);
@@ -307,7 +363,6 @@ async function shareArticle() {
 }
 
 function backToHome() {
-  localStorage.removeItem('gs_reading');
   loadHome();
 }
 
@@ -513,7 +568,6 @@ window.addEventListener('scroll', throttle(() => {
   if (!completedFired && pct >= 90) {
     completedFired = true;
     sendEvent('completed', pct);
-    localStorage.removeItem('gs_reading');
     show($('post-read-feedback'));
   }
 }, 800));
@@ -554,7 +608,10 @@ async function loadNotes(articleId) {
   } catch (e) {}
 }
 
+let currentNotes = [];
+
 function renderNotes(notes) {
+  currentNotes = notes || [];
   let section = document.getElementById('notes-section');
   if (!section) {
     section = document.createElement('section');
@@ -566,9 +623,69 @@ function renderNotes(notes) {
   if (!notes.length) { section.innerHTML = ''; return; }
   let html = '<h3 class="section-label">Your notes</h3>';
   for (const n of notes) {
-    html += `<div class="note-item"><p class="note-text">${escapeHTML(n.text)}</p></div>`;
+    html += `<div class="note-item" id="note-item-${n.id}">
+      <div class="note-view" id="note-view-${n.id}">
+        <p class="note-text" id="note-text-${n.id}">${escapeHTML(n.text)}</p>
+        <div class="note-actions">
+          <button class="note-action-btn" onclick="startEditNote(${n.id})">Edit</button>
+          <button class="note-action-btn note-del-btn" onclick="deleteNote(${n.id})">Delete</button>
+        </div>
+      </div>
+      <div class="note-edit-box hidden" id="note-edit-${n.id}">
+        <textarea class="article-note" id="note-edit-text-${n.id}" rows="3"></textarea>
+        <div class="note-edit-actions">
+          <button class="feedback-btn note-save-btn" onclick="saveNoteEdit(${n.id})">Save</button>
+          <button class="feedback-btn note-cancel-btn" onclick="cancelNoteEdit(${n.id})">Cancel</button>
+        </div>
+      </div>
+    </div>`;
   }
   section.innerHTML = html;
+}
+
+function startEditNote(id) {
+  const note = currentNotes.find(n => n.id === id);
+  if (!note) return;
+  const viewEl = $('note-view-' + id);
+  const editEl = $('note-edit-' + id);
+  const textarea = $('note-edit-text-' + id);
+  if (!viewEl || !editEl || !textarea) return;
+  textarea.value = note.text;
+  hide(viewEl);
+  show(editEl);
+  textarea.focus();
+}
+
+function cancelNoteEdit(id) {
+  const viewEl = $('note-view-' + id);
+  const editEl = $('note-edit-' + id);
+  if (!viewEl || !editEl) return;
+  hide(editEl);
+  show(viewEl);
+}
+
+async function saveNoteEdit(id) {
+  const textarea = $('note-edit-text-' + id);
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  if (!text) return;
+  try {
+    await api('/api/note/' + id, {
+      method: 'PUT',
+      body: JSON.stringify({ text }),
+    });
+    if (current) loadNotes(current.id);
+  } catch (e) {}
+}
+
+async function deleteNote(id) {
+  if (!confirm('Delete this note?')) return;
+  try {
+    await api('/api/note/' + id, {
+      method: 'DELETE',
+    });
+    if (current) loadNotes(current.id);
+  } catch (e) {}
 }
 
 window.addEventListener('visibilitychange', () => {

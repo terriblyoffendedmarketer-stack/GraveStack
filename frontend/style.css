@@ -394,7 +394,16 @@ summary { color: var(--accent); cursor: pointer; font-size: .9rem; }
 .notes-section { padding: 0 20px 24px; }
 .note-item { border-left: 3px solid var(--muted); padding: 8px 12px; margin-bottom: 10px;
   background: rgba(0,0,0,.03); border-radius: 0 6px 6px 0; }
-.note-text { margin: 0; font-size: .9rem; color: var(--fg); line-height: 1.5; }
+.note-text { margin: 0; font-size: .9rem; color: var(--fg); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.note-actions { display: flex; gap: 8px; margin-top: 6px; }
+.note-action-btn { background: none; border: none; color: var(--muted); font-size: .8rem;
+  cursor: pointer; padding: 2px 8px; border-radius: 4px; font-family: var(--sans); }
+.note-action-btn:hover { color: var(--fg); background: var(--line); }
+.note-del-btn:hover { color: #d32f2f; }
+.note-edit-box { margin-top: 4px; }
+.note-edit-actions { display: flex; gap: 8px; margin-top: 8px; }
+.note-save-btn { padding: 6px 16px; font-size: .85rem; background: var(--accent); color: #fff; border-color: var(--accent); }
+.note-cancel-btn { padding: 6px 16px; font-size: .85rem; background: transparent; color: var(--muted); }
 
 /* History */
 .history-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
